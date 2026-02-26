@@ -7,22 +7,11 @@ requires-python = ">=3.10"
 authors = [
     { name = "National_Diet_Library", email = "lab@ndl.go.jp" }
 ]
-dependencies = [
-  "flet==0.27.6",
-  "dill==0.3.8",
-  "lxml==5.4.0",
-  "networkx==3.3",
-  "onnxruntime==1.23.2",
-  "pillow==12.1.1",
-  "ordered-set==4.1.0",
-  "protobuf==6.31.1",
-  "pyparsing==3.1.2",
-  "PyYAML==6.0.1",
-  "tqdm==4.66.4",
-  "reportlab==4.2.5",
-  "pypdfium2==4.30.0",
-  "numpy==2.2.2"
-]
+
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
 
 [tool.flet]
 # org name in reverse domain name notation, e.g. "com.mycompany".
