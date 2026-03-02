@@ -145,7 +145,7 @@ def process(args):
     
     for inputpath in rawinputpathlist:
         ext=inputpath.split(".")[-1]
-        if ext in ["jpg","png","tiff","jp2","tif","jpeg","bmp"]:
+        if ext.lower() in ["jpg","png","tiff","jp2","tif","jpeg","bmp"]:
             inputpathlist.append(inputpath)
     if len(inputpathlist)==0:
         print("Images are not found.")

@@ -25,6 +25,7 @@ import base64
 import ctypes
 from io import BytesIO
 from uicomponent.localelabel import TRANSLATIONS
+from collections import Counter
 
 
 from reading_order.xy_cut.eval import eval_xml
@@ -859,6 +860,7 @@ def main(page: ft.Page):
     args = parser.parse_args()
     
     page.title = "NDLOCR-Lite-GUI"
+    page.theme_mode = ft.ThemeMode.SYSTEM
     page.window.icon=os.path.join("assets","icon.png")
     page.window.width = 1024
     page.window.height = 900
@@ -1176,54 +1178,105 @@ def main(page: ft.Page):
             page.update()
 
         def pick_directory_result(e: ft.FilePickerResultEvent):
-            #print(e.path)
             if e.path:
                 selected_input_path.value = e.path
-                nonlocal inputpathlist,outputtxtlist
+                nonlocal inputpathlist, outputtxtlist
                 inputpathlist.clear()
                 outputtxtlist.clear()
-                cleanflag=False
-                for inputname in os.listdir(e.path):
-                    inputpath=os.path.join(e.path,inputname)
-                    ext=inputpath.split(".")[-1]
-                    if ext.lower() in ["jpg","png","tiff","jp2","tif","jpeg","bmp"] and os.path.isfile(inputpath):
-                        inputpathlist.append(inputpath)
-                    elif ext=="pdf" and os.path.isfile(inputpath):
-                        filestem=os.path.basename(inputpath)[:-4]
-                        if config_obj["langcode"]=="ja":
-                            progressmessage.value="pdfファイルの前処理中…… {} ".format(e.files[0].path)
-                        else:
-                            progressmessage.value="preprocessing pdf…… {} ".format(e.files[0].path)
-                        parts_control(True)
-                        page.update()
-                        if not cleanflag:
-                            for p in glob.glob(os.path.join(os.getcwd(),PDFTMPPATH,"*.jpg")):
-                                if os.path.isfile(p):
-                                    os.remove(p)
-                            cleanflag=True
-                        os.makedirs(os.path.join(os.getcwd(),PDFTMPPATH), exist_ok=True)
-                        doc = pypdfium2.PdfDocument(inputpath)
-                        pdfarray=doc.render(pypdfium2.PdfBitmap.to_pil,
-                                            page_indices = [i for i in range(len(doc))],
-                                            scale = 100/72)
-                        for ix,image in enumerate(list(pdfarray)):
-                            outputtmppath=os.path.join(os.getcwd(),PDFTMPPATH,"{}_{:05}.jpg".format(filestem,ix))
-                            inputpathlist.append(outputtmppath)
-                            image=image.convert("RGB")
-                            image.save(outputtmppath)
+                
+                for p in glob.glob(os.path.join(os.getcwd(), PDFTMPPATH, "*.jpg")):
+                    if os.path.isfile(p):
+                        try:
+                            os.remove(p)
+                        except Exception:
+                            pass
+                os.makedirs(os.path.join(os.getcwd(), PDFTMPPATH), exist_ok=True)
 
-                        if config_obj["langcode"]=="ja":
-                            progressmessage.value="pdfファイルの前処理完了"
+                parts_control(True)
+                crop_btn.disabled = True
+                ocr_btn.disabled = True
+                page.update()
+
+                all_files_to_process = []
+                pdf_filename_counter = Counter()
+
+                for root, dirs, files in os.walk(e.path):
+                    dirs.sort()
+                    files.sort()
+                    for filename in files:
+                        full_path = os.path.join(root, filename)
+                        ext = filename.split(".")[-1].lower()
+
+                        # 対象の拡張子かチェック
+                        if ext in ["jpg", "png", "tiff", "jp2", "tif", "jpeg", "bmp"]:
+                            all_files_to_process.append((full_path, "image"))
+                        elif ext == "pdf":
+                            all_files_to_process.append((full_path, "pdf"))
+                            # ファイル名(拡張子込み)の出現回数をカウント
+                        pdf_filename_counter[filename] += 1
+
+                # --- 3. 収集したファイルを順次処理 ---
+                # パス順にソートして処理（見た目の順序を保証）
+                all_files_to_process.sort(key=lambda x: x[0])
+
+                for inputpath, filetype in all_files_to_process:
+                    if filetype == "image":
+                        inputpathlist.append(inputpath)
+                    
+                    elif filetype == "pdf":
+                        filename = os.path.basename(inputpath)
+                        
+                        # --- 重複判定ロジック ---
+                        if pdf_filename_counter[filename] > 1:
+                            # 重複がある場合: 相対パスを - でつなげたものを識別子にする
+                            # 例: ./sub/folder/file.pdf -> sub-folder-file
+                            rel_path = os.path.relpath(inputpath, start=e.path)
+                            filestem = os.path.splitext(rel_path)[0].replace(os.sep, "-")
                         else:
-                            progressmessage.value="Preprocessing of pdf complete"
-                        parts_control(False)
-                        crop_btn.disabled=True
-                        ocr_btn.disabled=True
+                            # 重複がない場合: 通常のファイル名を使用
+                            filestem = os.path.splitext(filename)[0]
+                        # ----------------------
+
+                        # メッセージ更新
+                        if config_obj["langcode"] == "ja":
+                            progressmessage.value = "pdfファイルの前処理中…… {} ".format(inputpath)
+                        else:
+                            progressmessage.value = "preprocessing pdf…… {} ".format(inputpath)
                         page.update()
+
+                        try:
+                            doc = pypdfium2.PdfDocument(inputpath)
+                            pdfarray = doc.render(
+                                pypdfium2.PdfBitmap.to_pil,
+                                page_indices=[i for i in range(len(doc))],
+                                scale=100/72
+                            )
+                            
+                            for ix, image in enumerate(list(pdfarray)):
+                                # 生成ファイル名: 識別子(重複時はパス込)_ページ番号.jpg
+                                outputtmppath = os.path.join(
+                                    os.getcwd(), 
+                                    PDFTMPPATH, 
+                                    "{}_{:05}.jpg".format(filestem, ix)
+                                )
+                                inputpathlist.append(outputtmppath)
+                                image = image.convert("RGB")
+                                image.save(outputtmppath)
+                                
+                        except Exception as err:
+                            print(f"Error processing {inputpath}: {err}")
+
+                # --- 4. 完了処理 ---
+                if config_obj["langcode"] == "ja":
+                    progressmessage.value = "処理完了"
+                else:
+                    progressmessage.value = "Processing complete"
+
                 selector.set_image(inputpathlist)
-                #print(inputpath)
-            if selected_output_path.value!=None and len(inputpathlist)>0:
-                parts_control(False)
+                
+                if len(inputpathlist) > 0:
+                    parts_control(False)
+
             selected_input_path.update()
             page.update()
 
