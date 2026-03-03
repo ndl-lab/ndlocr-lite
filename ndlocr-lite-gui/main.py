@@ -427,7 +427,7 @@ class ImageSelector:
 
 
 class CaptureTool:
-    def __init__(self, page: ft.Page,config_obj:Dict, detector=None, recognizer30=None, recognizer50=None, recognizer100=None, width: int = 400, height: int = 400):
+    def __init__(self, page: ft.Page,config_obj:Dict, detector=None, recognizer30=None, recognizer50=None, recognizer100=None, width: int = 400, height: int = 300):
         self.page = page
         self.config_obj=config_obj
         self.langcode=config_obj["langcode"]
