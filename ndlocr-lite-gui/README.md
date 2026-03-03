@@ -29,7 +29,7 @@ https://zenn.dev/nakamura196/articles/c62a465537ff20
 ## 自分でアプリケーションをビルドする場合の方法（開発者向け情報）
 本アプリケーションは[Flet（外部サイト）](https://flet.dev/)を利用します。
 
-いずれのOSの場合にも事前にFlutter-SDKの導入が必要です。依存関係のインストールに関する説明は省略します。
+いずれのOSの場合にも事前にFlutter-SDK3.27.4の導入が必要です。依存関係のインストールに関する説明は省略します。
 
 ### Windowsの場合
 https://flet.dev/docs/publish/windows/
