@@ -237,6 +237,7 @@ def process(args):
             alllineobj, recognizer30, recognizer50, recognizer100, is_cascade=True
         )
         alltextlist.append("\n".join(resultlinesall))
+        used_detections = set()
         for idx,lineobj in enumerate(root.findall(".//LINE")):
             lineobj.set("STRING",resultlinesall[idx])
             xmin=int(lineobj.get("X"))
@@ -246,17 +247,63 @@ def process(args):
             try:
                 conf=float(lineobj.get("CONF"))
             except:
-                conf=0
+                conf=0.0
+            
+            # Map back to raw detections via highest IoU to extract class index
+            best_iou = 0.0
+            best_det_idx = -1
+            for d_idx, det in enumerate(detections):
+                d_xmin, d_ymin, d_xmax, d_ymax = det["box"]
+                inter_x1 = max(xmin, d_xmin)
+                inter_y1 = max(ymin, d_ymin)
+                inter_x2 = min(xmin+line_w, d_xmax)
+                inter_y2 = min(ymin+line_h, d_ymax)
+                if inter_x2 > inter_x1 and inter_y2 > inter_y1:
+                    inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+                    union_area = (line_w * line_h) + ((d_xmax - d_xmin) * (d_ymax - d_ymin)) - inter_area
+                    iou = inter_area / union_area
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_det_idx = d_idx
+                        
+            c_idx = 1
+            if best_det_idx != -1:
+                c_idx = int(detections[best_det_idx]["class_index"])
+                used_detections.add(best_det_idx)
+
             jsonobj={"boundingBox": [[xmin,ymin],[xmin,ymin+line_h],[xmin+line_w,ymin],[xmin+line_w,ymin+line_h]],
-                "id": idx,"isVertical": "true","text": resultlinesall[idx],"isTextline": "true","confidence": conf}
+                "id": idx,"isVertical": "true","text": resultlinesall[idx],"isTextline": "true","confidence": conf, "class_index": c_idx}
             resjsonarray.append(jsonobj)
+        
+        # Output unmapped bounding boxes if requested
+        if getattr(args, "output_all_classes", False):
+            for d_idx, det in enumerate(detections):
+                if d_idx not in used_detections:
+                    d_xmin, d_ymin, d_xmax, d_ymax = det["box"]
+                    d_conf = float(det["confidence"])
+                    c_idx = int(det["class_index"])
+                    d_xmin, d_ymin, d_xmax, d_ymax = int(d_xmin), int(d_ymin), int(d_xmax), int(d_ymax)
+                    jsonobj = {
+                        "boundingBox": [[d_xmin, d_ymin], [d_xmin, d_ymax],[d_xmax, d_ymin], [d_xmax, d_ymax]],
+                        "id": len(resjsonarray),
+                        "isVertical": "true",
+                        "text": "",
+                        "isTextline": "false",
+                        "confidence": d_conf,
+                        "class_index": c_idx
+                    }
+                    resjsonarray.append(jsonobj)
+
         allxmlstr+=(ET.tostring(root.find("PAGE"), encoding='unicode')+"\n")
         allxmlstr+="</OCRDATASET>"
         if alllinecnt>0 and tatelinecnt/alllinecnt>0.5:
             alltextlist=alltextlist[::-1]
         output_stem = os.path.splitext(os.path.basename(inputpath))[0]
-        with open(os.path.join(args.output,output_stem+".xml"),"w",encoding="utf-8") as wf:
-            wf.write(allxmlstr)
+        
+        if not getattr(args, "json_only", False):
+            with open(os.path.join(args.output,output_stem+".xml"),"w",encoding="utf-8") as wf:
+                wf.write(allxmlstr)
+                
         with open(os.path.join(args.output,output_stem+".json"),"w",encoding="utf-8") as wf:
             alljsonobj={
                 "contents":[resjsonarray],
@@ -269,8 +316,10 @@ def process(args):
             }
             alljsonstr=json.dumps(alljsonobj,ensure_ascii=False,indent=2)
             wf.write(alljsonstr)
-        with open(os.path.join(args.output,output_stem+".txt"),"w",encoding="utf-8") as wtf:
-            wtf.write("\n".join(alltextlist))
+            
+        if not getattr(args, "json_only", False):
+            with open(os.path.join(args.output,output_stem+".txt"),"w",encoding="utf-8") as wtf:
+                wtf.write("\n".join(alltextlist))
         print("Total calculation time (Detection + Recognition):",time.time()-start)
 
 def main():
@@ -294,6 +343,8 @@ def main():
     parser.add_argument("--rec-weights", type=str, required=False, help="Path to parseq-tiny onnx file", default=str(base_dir / "model" / "parseq-ndl-16x768-100-tiny-165epoch-tegaki2.onnx"))
     parser.add_argument("--rec-classes", type=str, required=False, help="Path to list of class in yaml file", default=str(base_dir / "config" / "NDLmoji.yaml"))
     parser.add_argument("--device", type=str, required=False, help="Device use (cpu or cuda)", choices=["cpu", "cuda"], default="cpu")
+    parser.add_argument("--output-all-classes", action="store_true", help="Output all detected lines to JSON regardless of their class_index")
+    parser.add_argument("--json-only", action="store_true", help="Disable .xml and .txt output and only output JSON")
     args = parser.parse_args()
     process(args)
 
