@@ -112,7 +112,7 @@ class DEIM:
                 "pred_char_count":char_count,
                 "class_name": self.classes[class_index]#"line_main"
             })
-        print(len(detections))
+        #print(len(detections))
         #print(char_counts)
         return detections
     
