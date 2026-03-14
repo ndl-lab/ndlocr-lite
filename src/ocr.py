@@ -112,6 +112,10 @@ def get_recognizer(args,weights_path=None):
     charlist=list(charobj["model"]["charset_train"])
     
     recognizer = PARSEQ(model_path=weights_path,charlist=charlist,device=args.device)
+    if getattr(args, 'enable_tcy', False):
+        from tcy_wrapper import TateChuYokoWrapper
+        tcy_kwargs = {k: v for k, v in vars(args).items() if k.startswith('tcy_') and k != 'enable_tcy' and v is not None}
+        recognizer = TateChuYokoWrapper(recognizer, **tcy_kwargs)
     return recognizer
 
 
@@ -307,7 +311,15 @@ def main():
     parser.add_argument("--rec-weights", type=str, required=False, help="Path to parseq-tiny onnx file", default=str(base_dir / "model" / "parseq-ndl-16x768-100-tiny-165epoch-tegaki2.onnx"))
     parser.add_argument("--rec-classes", type=str, required=False, help="Path to list of class in yaml file", default=str(base_dir / "config" / "NDLmoji.yaml"))
     parser.add_argument("--device", type=str, required=False, help="Device use (cpu or cuda)", choices=["cpu", "cuda"], default="cpu")
-    args = parser.parse_args()
+    parser.add_argument("--enable-tcy", action="store_true", dest="enable_tcy", default=False, help="Enable tate-chuu-yoko (縦中横) detection for vertical text (e.g. newspaper OCR)")
+    args, remaining = parser.parse_known_args()
+    if args.enable_tcy and remaining:
+        from tcy_wrapper import add_tcy_arguments
+        tcy_parser = add_tcy_arguments(parser)
+        tcy_args = tcy_parser.parse_args(remaining)
+        for k, v in vars(tcy_args).items():
+            if v is not None:
+                setattr(args, k, v)
     process(args)
 
 if __name__=="__main__":
