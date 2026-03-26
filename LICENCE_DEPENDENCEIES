@@ -969,8 +969,8 @@ A copy of the Apache License License is included in this file.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-# ndlkoten2tei.py
-
+# TEI converter
+# Copyright 2025 Kiyonori Nagasaki
       Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
