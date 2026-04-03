@@ -80,7 +80,7 @@ def parse_root(root, xml_path=None):
             ) else False if "false" == kyokaku.lower() else None
         dat["pages"].append({
             "index": i,
-            "pid": Path(xml_path).name.split(".")[0] if xml_path else "unknown",
+            "pid": Path(xml_path).stem if xml_path else "unknown",
             "width": int(page.get("WIDTH", -1)),
             "height": int(page.get("HEIGHT", -1)),
             "image": page.get("IMAGENAME"),

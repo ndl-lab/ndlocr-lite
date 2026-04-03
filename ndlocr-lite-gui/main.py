@@ -346,7 +346,7 @@ class ImageSelector:
         buff = BytesIO()
         im_crop.save(buff, "png")
         self.crop_image.src_base64=base64.b64encode(buff.getvalue()).decode("utf-8")
-        self.outputcroppedpath=os.path.join(os.getcwd(),PDFTMPPATH,os.path.basename(self.image_src).split(".")[0]+"_cropped_{}.jpg".format(self.cnt))
+        self.outputcroppedpath=os.path.join(os.getcwd(),PDFTMPPATH,os.path.splitext(os.path.basename(self.image_src))[0]+"_cropped_{}.jpg".format(self.cnt))
         #im_crop.save(self.outputcroppedpath)
         self.mini_ocr(im_crop)
         self.cnt+=1
@@ -415,7 +415,7 @@ class ImageSelector:
         
         if alllinecnt==0 or tatelinecnt/alllinecnt>0.5:
             alltextlist=alltextlist[::-1]
-        with open(os.path.join(self.outputdirpath,os.path.basename(inputname).split(".")[0]+".txt"),"w",encoding="utf-8") as wtf:
+        with open(os.path.join(self.outputdirpath,os.path.splitext(os.path.basename(inputname))[0]+".txt"),"w",encoding="utf-8") as wtf:
             wtf.write("\n".join(alltextlist))
         self.resulttext.value="\n".join(alltextlist)
         self.cropocr_btn.disabled=False
@@ -1087,7 +1087,7 @@ def main(page: ft.Page):
                     }
                     alljsonobjlist.append(alljsonobj)
                     if chkbx_xml.value:
-                        with open(os.path.join(outputpath,os.path.basename(inputpath).split(".")[0]+".xml"),"w",encoding="utf-8") as wf:
+                        with open(os.path.join(outputpath,os.path.splitext(os.path.basename(inputpath))[0]+".xml"),"w",encoding="utf-8") as wf:
                             wf.write(allxmlstr)
                     if chkbx_visualize.value:
                         output_vizpath=os.path.join(outputpath,"viz_"+os.path.basename(inputpath))
@@ -1096,13 +1096,13 @@ def main(page: ft.Page):
                         visualizepathlist.append(output_vizpath)
                         origin_detector.drawxml_detections(npimg=img,xmlstr=allxmlstr,categories=categories_org_name_index,outputimgpath=output_vizpath)
                     if chkbx_json.value:
-                        with open(os.path.join(outputpath,os.path.basename(inputpath).split(".")[0]+".json"),"w",encoding="utf-8") as wf:
+                        with open(os.path.join(outputpath,os.path.splitext(os.path.basename(inputpath))[0]+".json"),"w",encoding="utf-8") as wf:
                             wf.write(json.dumps(alljsonobj,ensure_ascii=False,indent=2))
                     if chkbx_txt.value:
-                        with open(os.path.join(outputpath,os.path.basename(inputpath).split(".")[0]+".txt"),"w",encoding="utf-8") as wtf:
+                        with open(os.path.join(outputpath,os.path.splitext(os.path.basename(inputpath))[0]+".txt"),"w",encoding="utf-8") as wtf:
                             wtf.write("\n".join(alltextlist))
                     if chkbx_pdf.value:
-                        create_pdf_func(os.path.join(outputpath,os.path.basename(inputpath).split(".")[0]+".pdf"),img,resjsonarray,chkbx_pdf_viztxt.value)
+                        create_pdf_func(os.path.join(outputpath,os.path.splitext(os.path.basename(inputpath))[0]+".pdf"),img,resjsonarray,chkbx_pdf_viztxt.value)
                         
                     progressbar.value+=1/allsum
                     preview_prev_btn.disabled=False
@@ -1122,7 +1122,7 @@ def main(page: ft.Page):
                     progressmessage.value="{} images completed / Total time {:.2f} sec".format(allsum,time.time()-allstart)
                 progressmessage.update()
                 if chkbx_tei.value:
-                    with open(os.path.join(outputpath,os.path.basename(inputpathlist[0]).split(".")[0]+"_tei.xml"),"wb") as wf:
+                    with open(os.path.join(outputpath,os.path.splitext(os.path.basename(inputpathlist[0]))[0]+"_tei.xml"),"wb") as wf:
                         allxmlstrtei=convert_tei(alljsonobjlist)
                         wf.write(allxmlstrtei)
             except Exception as e:
