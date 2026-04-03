@@ -102,6 +102,8 @@ class DEIM:
             self.image_height / self.input_width
         ], dtype=np.float32)
         boxes = (predictions[:, :4] * scales).astype(np.int32)
+        boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0, self.image_width)
+        boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0, self.image_height)
         detections = []
         for bbox, score, label,char_count in zip(boxes, scores, class_ids,char_counts):
             class_index=int(label)-1
