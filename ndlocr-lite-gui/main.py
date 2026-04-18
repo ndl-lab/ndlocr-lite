@@ -877,6 +877,7 @@ def main(page: ft.Page):
                      "txt":True,
                      "pdf":False,
                      "pdf_viztxt":False,
+                     "pdf_combined":False,
                      "selected_output_path":None,
                      "prompt":""
                      }
@@ -923,7 +924,7 @@ def main(page: ft.Page):
         visualizepathlist=[]
         outputtxtlist=[]
 
-        def create_pdf_func(outputpath:str,img:object,bboxlistobj:dict,viztxtflag:bool):
+        def create_pdf_func(outputpath:str,pages:list,viztxtflag:bool):
             import reportlab
             from reportlab.pdfgen import canvas
             from reportlab.lib.pagesizes import portrait
@@ -932,36 +933,38 @@ def main(page: ft.Page):
             from reportlab.lib.units import mm
             from reportlab.lib.utils import ImageReader
             from reportlab.lib.colors import blue
-            
-            print((img.shape[1],img.shape[0]))
-            c = canvas.Canvas(outputpath, pagesize=(img.shape[1],img.shape[0]))
+
+            if not pages:
+                return
+            c = canvas.Canvas(outputpath)
             pdfmetrics.registerFont(UnicodeCIDFont('HeiseiMin-W3', isVertical=True))
             pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5', isVertical=False))
-            pilimg_data = io.BytesIO()
-            pilimg=Image.fromarray(img)
-            pilimg.save(pilimg_data, format='png')
-            pilimg_data.seek(0)
-            side_out = ImageReader(pilimg_data)
-            #Image.fromarray(new_image)
-            c.drawImage(side_out,0,0)
-            if viztxtflag:
-                c.setFillColor(blue)
-            else:
-                c.setFillColor(blue,alpha=0.0)
-            for bboxobj in bboxlistobj:
-                bbox=bboxobj["boundingBox"]
-                text=bboxobj["text"]
-                if abs(bbox[2][0]-bbox[0][0])<abs(bbox[1][1]-bbox[0][1]):
-                    x_center=(bbox[0][0]+bbox[2][0])//2
-                    y_center=img.shape[0]-bbox[0][1]
-                    c.setFont('HeiseiMin-W3', abs(bbox[2][0]-bbox[0][0])*3//4)
-                    c.drawString(x_center,y_center, text)
+            for page_idx,(img,bboxlistobj) in enumerate(pages):
+                c.setPageSize((img.shape[1],img.shape[0]))
+                pilimg_data = io.BytesIO()
+                pilimg=Image.fromarray(img)
+                pilimg.save(pilimg_data, format='png')
+                pilimg_data.seek(0)
+                side_out = ImageReader(pilimg_data)
+                c.drawImage(side_out,0,0)
+                if viztxtflag:
+                    c.setFillColor(blue)
                 else:
-                    
-                    x_center=min(bbox[0][0],bbox[2][0])
-                    y_center=img.shape[0]-(bbox[0][1]+bbox[1][1])//2
-                    c.setFont('HeiseiKakuGo-W5', abs(bbox[1][1]-bbox[0][1]))
-                    c.drawString(x_center,y_center, text)
+                    c.setFillColor(blue,alpha=0.0)
+                for bboxobj in bboxlistobj:
+                    bbox=bboxobj["boundingBox"]
+                    text=bboxobj["text"]
+                    if abs(bbox[2][0]-bbox[0][0])<abs(bbox[1][1]-bbox[0][1]):
+                        x_center=(bbox[0][0]+bbox[2][0])//2
+                        y_center=img.shape[0]-bbox[0][1]
+                        c.setFont('HeiseiMin-W3', abs(bbox[2][0]-bbox[0][0])*3//4)
+                        c.drawString(x_center,y_center, text)
+                    else:
+                        x_center=min(bbox[0][0],bbox[2][0])
+                        y_center=img.shape[0]-(bbox[0][1]+bbox[1][1])//2
+                        c.setFont('HeiseiKakuGo-W5', abs(bbox[1][1]-bbox[0][1]))
+                        c.drawString(x_center,y_center, text)
+                c.showPage()
             c.save()
         
 
@@ -1003,6 +1006,7 @@ def main(page: ft.Page):
                 visualizepathlist.clear()
                 visualizepathlist=[]
                 alljsonobjlist=[]
+                combined_pdf_pages=[]
                 for idx,inputpath in enumerate(inputpathlist):
                     progressmessage.value=inputpath
                     progressmessage.update()
@@ -1102,7 +1106,10 @@ def main(page: ft.Page):
                         with open(os.path.join(outputpath,os.path.basename(inputpath).split(".")[0]+".txt"),"w",encoding="utf-8") as wtf:
                             wtf.write("\n".join(alltextlist))
                     if chkbx_pdf.value:
-                        create_pdf_func(os.path.join(outputpath,os.path.basename(inputpath).split(".")[0]+".pdf"),img,resjsonarray,chkbx_pdf_viztxt.value)
+                        if chkbx_pdf_combined.value:
+                            combined_pdf_pages.append((img,resjsonarray))
+                        else:
+                            create_pdf_func(os.path.join(outputpath,os.path.basename(inputpath).split(".")[0]+".pdf"),[(img,resjsonarray)],chkbx_pdf_viztxt.value)
                         
                     progressbar.value+=1/allsum
                     preview_prev_btn.disabled=False
@@ -1125,6 +1132,14 @@ def main(page: ft.Page):
                     with open(os.path.join(outputpath,os.path.basename(inputpathlist[0]).split(".")[0]+"_tei.xml"),"wb") as wf:
                         allxmlstrtei=convert_tei(alljsonobjlist)
                         wf.write(allxmlstrtei)
+                if chkbx_pdf.value and chkbx_pdf_combined.value and combined_pdf_pages:
+                    src_path=selected_input_path.value or inputpathlist[0]
+                    if os.path.isdir(src_path):
+                        combined_stem=os.path.basename(os.path.normpath(src_path)) or "combined"
+                    else:
+                        combined_stem=os.path.splitext(os.path.basename(src_path))[0]
+                    combined_pdf_path=os.path.join(outputpath,combined_stem+".pdf")
+                    create_pdf_func(combined_pdf_path,combined_pdf_pages,chkbx_pdf_viztxt.value)
             except Exception as e:
                 print(e)
                 progressmessage.value=e
@@ -1341,6 +1356,7 @@ def main(page: ft.Page):
                 "tei":chkbx_tei.value,
                 "pdf":chkbx_pdf.value,
                 "pdf_viztxt":chkbx_pdf_viztxt.value,
+                "pdf_combined":chkbx_pdf_combined.value,
             })
             save_config()
             page.close(customize_dlg_modal)
@@ -1348,6 +1364,8 @@ def main(page: ft.Page):
         def change_pdfstatus(e):
             chkbx_pdf_viztxt.disabled=not chkbx_pdf.value
             chkbx_pdf_viztxt.update()
+            chkbx_pdf_combined.disabled=not chkbx_pdf.value
+            chkbx_pdf_combined.update()
         
 
         preview_image=ft.Image(src="dummy.dat", width=400, height=300,gapless_playback=True)
@@ -1368,6 +1386,7 @@ def main(page: ft.Page):
         chkbx_tei = ft.Checkbox(label="TEI形式", value=config_obj["tei"])
         chkbx_pdf = ft.Checkbox(label="透明テキスト付PDF(ベータ)", value=config_obj["pdf"],on_change=change_pdfstatus)
         chkbx_pdf_viztxt = ft.Checkbox(label="PDFに青色で文字を重ねる", value=config_obj["pdf_viztxt"],disabled=not chkbx_pdf.value)
+        chkbx_pdf_combined = ft.Checkbox(label="PDFを1ファイルにまとめる", value=config_obj["pdf_combined"],disabled=not chkbx_pdf.value)
 
         
         file_upload_btn=ft.ElevatedButton(
@@ -1424,6 +1443,7 @@ def main(page: ft.Page):
                 chkbx_json,
                 ft.Row([chkbx_xml,chkbx_tei]),
                 ft.Row([chkbx_pdf,chkbx_pdf_viztxt]),
+                ft.Row([chkbx_pdf_combined]),
                 ft.TextButton("OK", on_click=handle_customize_dlg_modal_close),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
