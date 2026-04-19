@@ -12,10 +12,19 @@
   "dependencies": {
     "comlink": "^4.4.1",
     "idb-keyval": "^6.2.1",
-    "onnxruntime-web": "^1.22.0"
+    "jszip": "^3.10.1",
+    "onnxruntime-web": "^1.22.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "tailwindcss": "^4.2.2",
     "typescript": "^5.7.3",
     "vite": "^6.3.2",
     "vite-plugin-static-copy": "^2.3.0"

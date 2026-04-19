@@ -1,5 +1,7 @@
 import { defineConfig } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const COOP_COEP_HEADERS = {
   "Cross-Origin-Opener-Policy": "same-origin",
@@ -8,6 +10,8 @@ const COOP_COEP_HEADERS = {
 
 export default defineConfig({
   plugins: [
+    react(),
+    tailwindcss(),
     viteStaticCopy({
       targets: [
         {
