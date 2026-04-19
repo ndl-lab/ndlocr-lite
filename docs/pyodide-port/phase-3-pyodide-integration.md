@@ -21,7 +21,10 @@ Main Thread (UI)
   │
   └── OrtClient  <---[postMessage]-------┘
                  └── onnxruntime-web (WASM)
-                     ※ Phase 2 の ortSession を wrap
+                     Phase 2 実装済み:
+                       src/ort/ortSession.ts  (セッション管理)
+                       src/ort/detector.ts    (runDeim)
+                       src/ort/recognizer.ts  (runParseq)
 ```
 
 - 「Pyodide Worker」が推論要求を **同期で**待つために `SharedArrayBuffer` + `Atomics.wait/notify` を使う。
@@ -87,6 +90,7 @@ Main Thread (UI)
 - [ ] **T3-4a**: Python 側の `infer` 抽象を JS 側へバインドする。
   - Pyodide Worker 内から Main Thread へ「推論要求」を送り、Main 側の `OrtClient` が別 Worker（ORT Worker）に投げる。
   - 戻りを Pyodide Worker が **await** する（async パス）。
+  - **Phase 2 実装済み**: `OrtClient` は `src/ort/detector.ts` の `runDeim()` と `src/ort/recognizer.ts` の `runParseq()` をラップする形で実装する。型定義は `src/types/ortTypes.ts` の `DetectorFeeds` / `DetectorOutputs` / `RecognizerFeeds` / `RecognizerOutputs` を使う。
 - [ ] **T3-4b**: Python 側ラッパー:
   ```python
   # ndlocr_web/bridge.py
