@@ -49,10 +49,10 @@ Main Thread (UI)
 
 ### T3-2: Worker のスケルトン
 
-- [ ] **T3-2a**: `frontend/src/workers/pyodide.worker.ts` を実装。
+- [ ] **T3-2a**: `ndlocr-lite-web/src/workers/pyodide.worker.ts` を実装。
   - 起動メッセージ: `init` → Pyodide + `ndlocr_web` ロード、`progress` イベント送出。
   - OCR メッセージ: `ocr` → ImageBitmap → Uint8ClampedArray → ndarray → `run_ocr_on_image` → 結果 JSON を返す。
-- [ ] **T3-2b**: `frontend/src/lib/OcrClient.ts` で Worker を起動・メッセージ送受信する高レベル API。
+- [ ] **T3-2b**: `ndlocr-lite-web/src/lib/OcrClient.ts` で Worker を起動・メッセージ送受信する高レベル API。
   ```ts
   const client = new OcrClient();
   await client.init((p) => setProgress(p));
@@ -89,10 +89,10 @@ Main Thread (UI)
 
 ### T3-5: Worker とメインの RPC 共通レイヤ
 
-- [ ] **T3-5a**: `frontend/src/lib/rpc.ts` に軽量 RPC を実装。
-  - リクエストごとに `id` を付与し、`postMessage({id, type, payload})` → レスポンス `postMessage({id, ok, result|error})`。
-  - Transferable は送信側が第 2 引数で指定。
-- [ ] **T3-5b**: OCR Worker と ORT Worker の双方で同じ RPC を使う。
+- [ ] **T3-5a**: **Phase 0 で Comlink 採用を決定済み**。`ndlocr-lite-web/src/lib/rpc.ts` は Comlink (`comlink` npm) の薄いラッパーとして作り、OCR Worker / ORT Worker 双方に型付きプロキシを提供する。
+  - Comlink の `Comlink.expose()` / `Comlink.wrap()` でリクエスト ID 管理を肩代わりさせる。
+  - Transferable は Comlink の `Comlink.transfer()` で明示。Pyodide 側は `to_js({ dict_converter: Object.fromEntries })` で整える。
+- [ ] **T3-5b**: OCR Worker と ORT Worker の双方で同じ Comlink 経由 RPC を使う。Comlink が足枷になるケース（`SharedArrayBuffer` + `Atomics` を使いたい Phase 5 最適化等）では `rpc.ts` に低レベル API を追加する。
 
 ### T3-6: エラーハンドリング・キャンセル
 
@@ -113,7 +113,7 @@ Main Thread (UI)
 
 ### T3-8: E2E スモークテスト
 
-- [ ] **T3-8a**: `frontend/tests/e2e/ocr.spec.ts`（Playwright）:
+- [ ] **T3-8a**: `ndlocr-lite-web/tests/e2e/ocr.spec.ts`（Playwright）:
   1. トップページ訪問
   2. サンプル画像をドロップ
   3. 進捗が 100% になるまで待機

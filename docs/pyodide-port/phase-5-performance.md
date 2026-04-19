@@ -23,9 +23,9 @@ MVP（Phase 4 までで動く状態）をベースに、初回ロード時間・
 
 - [ ] **T5-1a**: `onnxruntime` の `quantize_dynamic` で INT8 動的量子化を試す。
   - 対象: DEIM (detector), PARSeq tiny × 3。
-  - 精度回帰を `resource/*.xml` との比較で確認（文字一致率 -2pt 以内を許容）。
+  - 精度回帰を `resource/*.xml` との比較で確認（Phase 0 T0-8 の「文字一致率 ≥ 98%」から -2pt 以内を許容）。
 - [ ] **T5-1b**: FP16 変換版も作成（WebGPU で特に効く）。
-- [ ] **T5-1c**: モデルマニフェストに `variant: "fp32" | "fp16" | "int8"` を追加し、UI で切り替え可能に。
+- [ ] **T5-1c**: Phase 2 T2-1c の `manifest.json` に **Phase 0 T0-4 で予約した** `variant: "fp32" | "fp16" | "int8"` を書き込み、UI で切り替え可能に。
 
 ### T5-2: onnxruntime-web の高速化オプション
 
