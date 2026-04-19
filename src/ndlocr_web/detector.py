@@ -139,11 +139,13 @@ class DEIMDetector:
             ))
         return detections
 
-    def detect(self, img: np.ndarray) -> list[Detection]:
+    async def detect(self, img: np.ndarray) -> list[Detection]:
         """Full preprocess → infer → postprocess pipeline."""
+        import inspect
         img_h, img_w = img.shape[:2]
         feeds = self.preprocess(img)
-        outputs = self.infer(feeds)
+        result = self.infer(feeds)
+        outputs = await result if inspect.isawaitable(result) else result
         return self.postprocess(outputs, img_w, img_h)
 
     def draw_detections(self, npimg: np.ndarray, detections: list[Detection]) -> Image.Image:

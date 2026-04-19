@@ -1,4 +1,4 @@
-"""Serial 3-stage cascade recognition (no ThreadPoolExecutor)."""
+"""Serial 3-stage cascade recognition (async, works for sync infer too)."""
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
@@ -15,7 +15,7 @@ class RecogLine:
         return self.idx < other.idx
 
 
-def process_cascade(
+async def process_cascade(
     alllineobj: list[RecogLine],
     recognizer30,
     recognizer50,
@@ -39,7 +39,7 @@ def process_cascade(
 
     # Stage 30
     for lineobj in targetlist30:
-        pred_str = recognizer30.read(lineobj.npimg)
+        pred_str = await recognizer30.read(lineobj.npimg)
         if len(pred_str) >= 25:
             targetlist50.append(lineobj)
         else:
@@ -48,7 +48,7 @@ def process_cascade(
 
     # Stage 50
     for lineobj in targetlist50:
-        pred_str = recognizer50.read(lineobj.npimg)
+        pred_str = await recognizer50.read(lineobj.npimg)
         if len(pred_str) >= 45:
             targetlist100.append(lineobj)
         else:
@@ -57,9 +57,13 @@ def process_cascade(
 
     # Stage 100
     for lineobj in targetlist100:
-        pred_str = recognizer100.read(lineobj.npimg)
+        pred_str = await recognizer100.read(lineobj.npimg)
         lineobj.pred_str = pred_str
-        if len(pred_str) >= 98 and lineobj.npimg is not None and lineobj.npimg.shape[0] < lineobj.npimg.shape[1]:
+        if (
+            len(pred_str) >= 98
+            and lineobj.npimg is not None
+            and lineobj.npimg.shape[0] < lineobj.npimg.shape[1]
+        ):
             base = lineobj.npimg
             half = base.shape[1] // 2
             targetlist200.append(RecogLine(npimg=base[:, :half, :], idx=lineobj.idx, pred_char_cnt=100))
@@ -71,7 +75,7 @@ def process_cascade(
     for i in range(0, len(targetlist200) - 1, 2):
         left = targetlist200[i]
         right = targetlist200[i + 1]
-        combined = recognizer100.read(left.npimg) + recognizer100.read(right.npimg)
+        combined = (await recognizer100.read(left.npimg)) + (await recognizer100.read(right.npimg))
         merged = RecogLine(npimg=None, idx=left.idx, pred_char_cnt=100, pred_str=combined)
         resultall.append(merged)
 

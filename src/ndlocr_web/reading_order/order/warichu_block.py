@@ -8,8 +8,8 @@ import numpy as np
 import xml.etree.ElementTree as et
 
 
-from reading_order.utils.logger import get_logger
-from reading_order.utils.xml import IndexedTags, insert_before
+from ..utils.logger import get_logger
+from ..utils.xml import IndexedTags, insert_before
 
 
 def group_warichu(root):

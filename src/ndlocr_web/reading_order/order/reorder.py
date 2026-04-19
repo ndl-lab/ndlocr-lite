@@ -8,9 +8,9 @@ import numpy as np
 import functools
 
 
-from reading_order.utils.xml import ConstantNumberOfTags
-from reading_order.order.smooth_order import smooth_order
-from reading_order.order.warichu_block import GroupWarichu
+from ..utils.xml import ConstantNumberOfTags
+from .smooth_order import smooth_order
+from .warichu_block import GroupWarichu
 
 
 def check_iou(a, b):

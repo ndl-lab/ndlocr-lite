@@ -1,5 +1,6 @@
 import sys
 sys.setrecursionlimit(5000)
+import asyncio
 import os
 import glob
 import json
@@ -126,7 +127,7 @@ def process(args):
         img_name = os.path.basename(inputpath)
         start = time.time()
 
-        result = run_ocr_on_image(
+        result = asyncio.run(run_ocr_on_image(
             img,
             detector=detector,
             recognizer30=recognizer30,
@@ -134,7 +135,7 @@ def process(args):
             recognizer100=recognizer100,
             img_name=img_name,
             viz=args.viz,
-        )
+        ))
 
         output_stem = os.path.splitext(img_name)[0]
         with open(os.path.join(args.output, output_stem + ".xml"), "w", encoding="utf-8") as f:

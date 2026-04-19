@@ -1,7 +1,5 @@
 """Pure-function OCR pipeline for browser (Pyodide) use."""
 from __future__ import annotations
-import sys
-import os
 import json
 import io
 from dataclasses import dataclass, field
@@ -9,15 +7,9 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from PIL import Image, ImageDraw
 
-sys.setrecursionlimit(5000)
-
-_SRC_DIR = os.path.dirname(os.path.dirname(__file__))
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
-
-from reading_order.xy_cut.eval import eval_xml  # noqa: E402
-from .xml_builder import build_xml             # noqa: E402
-from .cascade import process_cascade, RecogLine  # noqa: E402
+from .reading_order.xy_cut.eval import eval_xml
+from .xml_builder import build_xml
+from .cascade import process_cascade, RecogLine
 
 
 @dataclass
@@ -28,7 +20,7 @@ class OcrResult:
     viz_png: bytes | None = None
 
 
-def run_ocr_on_image(
+async def run_ocr_on_image(
     rgb: np.ndarray,
     detector,
     recognizer30,
@@ -45,9 +37,9 @@ def run_ocr_on_image(
     rgb:
         H×W×3 uint8 numpy array in RGB order.
     detector:
-        DEIMDetector instance (or duck-typed equivalent with .detect() and .classes).
+        DEIMDetector instance with async .detect() method.
     recognizer30, recognizer50, recognizer100:
-        PARSeqRecognizer instances for 3-stage cascade.
+        PARSeqRecognizer instances for 3-stage cascade with async .read().
     img_name:
         Filename used inside generated XML; no I/O is performed.
     viz:
@@ -56,7 +48,7 @@ def run_ocr_on_image(
     img_h, img_w = rgb.shape[:2]
 
     # --- Detection ---
-    detections = detector.detect(rgb)
+    detections = await detector.detect(rgb)
     classeslist = list(detector.classes.values())
 
     # --- Build result_obj for ndl_parser ---
@@ -122,7 +114,7 @@ def run_ocr_on_image(
                 alllineobj.append(RecogLine(lineimg, idx, det.pred_char_count))
 
     # --- Recognition ---
-    resultlinesall = process_cascade(alllineobj, recognizer30, recognizer50, recognizer100)
+    resultlinesall = await process_cascade(alllineobj, recognizer30, recognizer50, recognizer100)
 
     # --- Write strings back into XML tree ---
     resjsonarray = []

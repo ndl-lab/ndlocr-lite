@@ -50,10 +50,12 @@ class PARSeqRecognizer:
         resval = indices[:end_pos].tolist()
         return "".join(self.charlist[i - 1] for i in resval)
 
-    def read(self, img: np.ndarray) -> str:
+    async def read(self, img: np.ndarray) -> str:
         """Full preprocess → infer → postprocess pipeline."""
+        import inspect
         if img is None or img.size == 0:
             return ""
         feeds = self.preprocess(img)
-        outputs = self.infer(feeds)
+        result = self.infer(feeds)
+        outputs = await result if inspect.isawaitable(result) else result
         return self.postprocess(outputs)

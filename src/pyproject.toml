@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ndlocr_web"
+version = "0.1.0"
+requires-python = ">=3.11"
+# Runtime deps are pre-loaded in Pyodide via loadPackage / micropip
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ndlocr_web*"]
+
+[tool.setuptools.package-data]
+"ndlocr_web.config" = ["*.yaml"]

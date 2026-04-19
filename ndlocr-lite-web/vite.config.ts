@@ -36,4 +36,10 @@ export default defineConfig({
       external: [],
     },
   },
+
+  worker: {
+    // Bundle workers as ES modules (required for Comlink expose/wrap and
+    // for dynamic imports inside the Pyodide worker).
+    format: "es",
+  },
 });

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "comlink": "^4.4.1",
     "idb-keyval": "^6.2.1",
     "onnxruntime-web": "^1.22.0"
   },

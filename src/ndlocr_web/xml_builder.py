@@ -1,15 +1,7 @@
 """Thin wrapper around ndl_parser.convert_to_xml_string3."""
 from __future__ import annotations
-import sys
-import os
 
-# Allow importing ndl_parser from the parent src/ directory when this package
-# is used from within that directory tree.
-_SRC_DIR = os.path.dirname(os.path.dirname(__file__))
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
-
-from ndl_parser import convert_to_xml_string3  # noqa: E402
+from .ndl_parser import convert_to_xml_string3
 
 
 def build_xml(
