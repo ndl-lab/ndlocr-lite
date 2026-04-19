@@ -2,6 +2,8 @@
 /ocrenv/
 /build/
 /__pycache__/
+src/build/
+src/*.egg-info/
 /ndlocr-lite-gui/build/
 /ndlocr-lite-gui/src/
 /ndlocr-lite-gui/userconf.yaml
