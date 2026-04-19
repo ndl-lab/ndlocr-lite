@@ -85,18 +85,27 @@ ndlocr-lite-web/
 
 Phase 1 で定義した「`infer(feeds) -> outputs`」に合致するものを JS 側に用意する。
 
+**Phase 1 で確定した feed キー:**
+- `DEIMDetector.preprocess()` → `{"images": tensor(1,3,H,W), "orig_target_sizes": int64(1,2)}`
+- `PARSeqRecognizer.preprocess()` → `{"input": tensor(1,3,H,W)}`
+
 - [ ] **T2-4a**: `ndlocr-lite-web/src/ort/detector.ts`
   ```ts
-  // feeds.image: Float32Array (1,3,H,W)
-  // feeds.orig_target_sizes: BigInt64Array (1,2)
-  // 戻り値: [class_ids, bboxes, scores, (char_counts?)]
+  // ※ Phase 1 確定: feed キーは "image" ではなく "images"
+  // feeds.images: Float32Array (1,3,H,W)
+  // feeds.orig_target_sizes: BigInt64Array (1,2)  ← int64 テンソル
+  // 戻り値: [class_ids, bboxes, scores] または [class_ids, bboxes, scores, char_counts]
   export async function runDeim(feeds: {
-    image: Float32Array; imageShape: [number, number, number, number];
+    images: Float32Array; imagesShape: [number, number, number, number];
     orig_target_sizes: BigInt64Array;
   }): Promise<Float32Array[]>;
   ```
+  - 戻り値の各要素は `(1,N)` / `(1,N,4)` / `(1,N)` / `(1,N)` の順。
+  - Python 側 `postprocess` は `np.squeeze` して 1D/2D で受け取る設計。
 - [ ] **T2-4b**: `ndlocr-lite-web/src/ort/recognizer.ts`
-  - `runParseq(variant: '30'|'50'|'100', image: Float32Array, shape: [1,3,H,W]): Promise<Float32Array>`
+  - ※ Phase 1 確定: feed キーは `"input"`。入力サイズはモデル別に固定:
+    - rec30: (W=256, H=16)、rec50: (W=384, H=16)、rec100: (W=768, H=16)
+  - `runParseq(variant: '30'|'50'|'100', feeds: { input: Float32Array, shape: [1,3,16,W] }): Promise<Float32Array[]>`
 - [ ] **T2-4c**: `Tensor` を作る際の `dtype` は DEIM が `float32` + `int64`, PARSeq が `float32`。`BigInt64Array` の扱いに注意する。
 - [ ] **T2-4d**: エラーハンドリング: メモリ不足 (`RangeError`) 時は「WebGPU→WASM」「モデル未ロード時の再取得」などのリトライ経路を明示。
 
@@ -110,14 +119,21 @@ Phase 1 で定義した「`infer(feeds) -> outputs`」に合致するものを J
 
 - [ ] **T2-6a**: `ndlocr-lite-web/src/types/ortTypes.ts` にて次を定義:
   ```ts
-  export interface DetectorOutputs {
-    classIds: Int32Array | Int64Array;
-    bboxes: Float32Array;     // flatten
-    scores: Float32Array;
-    charCounts?: Float32Array;
+  // Phase 1 確定: DEIMDetector.postprocess が期待する出力レイアウト
+  export interface DetectorFeeds {
+    images: Float32Array;          // shape (1,3,H,W)
+    imagesShape: [1, 3, number, number];
+    orig_target_sizes: BigInt64Array; // shape (1,2)
   }
-  export interface RecognizerInput {
-    image: Float32Array;
+  export interface DetectorOutputs {
+    classIds: Float32Array;        // shape (1,N) — モデル出力は float; postprocess で int 変換
+    bboxes: Float32Array;          // shape (1,N,4)
+    scores: Float32Array;          // shape (1,N)
+    charCounts?: Float32Array;     // shape (1,N) — optional
+  }
+  // Phase 1 確定: PARSeqRecognizer の feed キーは "input"
+  export interface RecognizerFeeds {
+    input: Float32Array;           // shape (1,3,H,W)
     shape: [1, 3, number, number];
   }
   ```

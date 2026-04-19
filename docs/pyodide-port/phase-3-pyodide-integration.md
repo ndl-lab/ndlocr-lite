@@ -34,13 +34,22 @@ Main Thread (UI)
 - [ ] **T3-1a**: Pyodide ランタイムの配信方法を決める。
   - 公式 CDN (`jsdelivr.net/npm/pyodide@<ver>/`) を使うのが最も簡単。
   - オフライン配信要件があるなら `pyodide` npm パッケージから静的ビルドして `public/pyodide/` に配置。
-- [ ] **T3-1b**: `ndlocr_web` の配布方法を決める。次のいずれか:
-  1. **ホイール化**: `src/ndlocr_web/` から `ndlocr_web-0.1.0-py3-none-any.whl` を作成し、`micropip.install('/wheels/ndlocr_web-...whl')`。純 Python なので any-wheel で可。
-  2. **ソース展開**: ビルド時に `ndlocr_web/**` を `public/py/` に配置し、Worker で `pyodide.unpackArchive` する。
-  - 推奨: **1 のホイール化**（依存解決が簡潔）。
+- [ ] **T3-1b**: `ndlocr_web` の配布方法を決める。
+
+  > **Phase 1 実装上の注意**: `xml_builder.py` は `sys.path` に `src/` を追加して `ndl_parser` を import する設計になっている。また `reading_order/` は `ndlocr_web` 内にコピー済みだが `ndl_parser.py` は `src/` 直下のまま。Pyodide ではこの相対パス解決が機能しないため、ホイール化時は以下の対処が必要:
+  > 1. `ndl_parser.py` を `ndlocr_web/` 内に移動（または `xml_builder.py` の import を `ndlocr_web` パッケージ相対 import に変更）。
+  > 2. `xml_builder.py` の `sys.path` 操作を削除し、`from .ndl_parser import convert_to_xml_string3` に変更。
+
+  配布方式:
+  1. **ホイール化（推奨）**: `src/ndlocr_web/` + `src/ndl_parser.py` を一まとめにして `ndlocr_web-0.1.0-py3-none-any.whl` を作成し `micropip.install('/wheels/ndlocr_web-...whl')`。
+  2. **ソース展開**: ビルド時に必要ファイルを `public/py/` に配置し Worker で `pyodide.unpackArchive` する。
+
 - [ ] **T3-1c**: 依存パッケージ導入:
+
+  > **Phase 1 実装で判明**: `reading_order/order/smooth_order.py` が `networkx` を import するため、`networkx` も必要。
+
   ```js
-  await pyodide.loadPackage(['numpy', 'Pillow', 'lxml']);
+  await pyodide.loadPackage(['numpy', 'Pillow', 'lxml', 'networkx']);
   await pyodide.runPythonAsync(`
     import micropip
     await micropip.install('PyYAML')  # Pyodide に無い/バージョン差異があれば
@@ -52,6 +61,7 @@ Main Thread (UI)
 - [ ] **T3-2a**: `ndlocr-lite-web/src/workers/pyodide.worker.ts` を実装。
   - 起動メッセージ: `init` → Pyodide + `ndlocr_web` ロード、`progress` イベント送出。
   - OCR メッセージ: `ocr` → ImageBitmap → Uint8ClampedArray → ndarray → `run_ocr_on_image` → 結果 JSON を返す。
+  - **Phase 1 確定**: `ndlocr_web.__init__` が `sys.setrecursionlimit(5000)` を呼ぶため Worker 側での明示的な設定は不要。
 - [ ] **T3-2b**: `ndlocr-lite-web/src/lib/OcrClient.ts` で Worker を起動・メッセージ送受信する高レベル API。
   ```ts
   const client = new OcrClient();
@@ -59,11 +69,17 @@ Main Thread (UI)
   const result = await client.ocr(imageBitmap, { viz: true });
   // result.xml / result.text / result.json / result.vizBlob
   ```
+  **Phase 1 確定の OcrResult フィールド**:
+  - `xml: str` — `<OCRDATASET>...</OCRDATASET>` 文字列
+  - `text: str` — 改行連結本文（縦書き時は行逆順）
+  - `json: dict` — `{"contents": [...], "imginfo": {...}}`
+  - `viz_png: bytes | None` — viz=True 時のみ PNG bytes
 
 ### T3-3: 画像転送
 
 - [ ] **T3-3a**: 画像は **ImageBitmap**（UI で `createImageBitmap(file)` 経由）で Worker へ転送（`postMessage([bitmap], [bitmap])` で Transferable）。
 - [ ] **T3-3b**: Worker 内で `OffscreenCanvas` + `getImageData` で `Uint8ClampedArray` を取得し、Pyodide へ `pyodide.toPy`（もしくは `pyodide.ffi.to_js`）で NumPy 配列化。
+  - **Phase 1 確定**: `run_ocr_on_image` の `rgb` 引数は `np.ndarray` (H×W×3, uint8, RGB 順)。`getImageData` の RGBA から `[:, :, :3]` でスライスする。
 - [ ] **T3-3c**: 大画像時のメモリを考え、Pyodide 側に渡すときは 1 度だけコピーして、以降は Python 内で参照する。
 
 ### T3-4: ONNX 推論呼び出し橋渡し
@@ -85,7 +101,10 @@ Main Thread (UI)
 - [ ] **T3-4c**: 数値ゼロコピー:
   - NumPy → JS: `np_array.tobytes()` ではなく、Pyodide の buffer プロトコル経由で `Float32Array` を作成。
   - JS → NumPy: `Float32Array` → `np.frombuffer`。
-- [ ] **T3-4d**: `run_ocr_on_image` を `async def` に変更（Phase 1 で既に分岐可能な設計にしておくこと）。`recognizer.read(img)` も `await` 対応。
+- [ ] **T3-4d**: `run_ocr_on_image` を `async def` に変更し、`process_cascade` / `recognizer.read()` も `await` 対応にする。
+  - **Phase 1 状態**: `run_ocr_on_image`・`process_cascade`・`PARSeqRecognizer.read` は現在同期関数。本フェーズで `async def run_ocr_on_image(...)` に変更し、cascade の各 `recognizer.read(img)` を `await` 呼び出しに変える。
+  - `DEIMDetector.detect` も同様に `async def detect` に変換する。
+  - `cascade.py` の `process_cascade` を `async def process_cascade(...)` として `await recognizerXX.read(img)` で直列 await する。
 
 ### T3-5: Worker とメインの RPC 共通レイヤ
 
