@@ -1,0 +1,21 @@
+
+# Classes
+names:
+  0: text_block
+  1: line_main
+  2: line_caption
+  3: line_ad
+  4: line_note
+  5: line_note_tochu
+  6: block_fig
+  7: block_ad
+  8: block_pillar
+  9: block_folio
+  10: block_rubi
+  11: block_chart
+  12: block_eqn
+  13: block_cfm
+  14: block_eng
+  15: block_table
+  16: line_title
+
