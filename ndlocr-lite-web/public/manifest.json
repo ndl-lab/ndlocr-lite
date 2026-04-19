@@ -1,0 +1,30 @@
+{
+  "version": "2026.04.19",
+  "baseUrl": "https://github.com/michitomo/ndlocr-lite/releases/download/models-v2026.04.19/",
+  "models": [
+    {
+      "id": "deim",
+      "file": "deim-s-1024x1024.onnx",
+      "sha256": "c156ce0c4e704bc3bf7e4016d0a87b949cffa8b3724f4b4cc696b8284c3c7373",
+      "size": 40256763
+    },
+    {
+      "id": "rec30",
+      "file": "parseq-ndl-16x256-30-tiny-192epoch-tegaki3.onnx",
+      "sha256": "0bc344b883cfb11f61e15bd02044dcf92997aef1f7dce84419c3aa3c3c677d54",
+      "size": 35848117
+    },
+    {
+      "id": "rec50",
+      "file": "parseq-ndl-16x384-50-tiny-146epoch-tegaki2.onnx",
+      "sha256": "1a60e88c9ffeaefdfe286677146f39fdeb4d0e1acd94ccd974c8943f761d9a08",
+      "size": 36920058
+    },
+    {
+      "id": "rec100",
+      "file": "parseq-ndl-16x768-100-tiny-165epoch-tegaki2.onnx",
+      "sha256": "712c7184a0a80a9048a5aefbfacd63876bacfb1c8d4d2f5c252dc39ad12bc3dd",
+      "size": 40984184
+    }
+  ]
+}
