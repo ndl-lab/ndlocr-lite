@@ -2,6 +2,12 @@
 
 MVP（Phase 4 までで動く状態）をベースに、初回ロード時間・推論スループット・メモリ使用量を改善する。Phase 2 で取得したベースライン値と比較しながら進める。
 
+> **Phase 4 実装後の注意**（2026-04-19 完了）:
+> - **UI スタック**: React 19 + Tailwind CSS v4 + Zustand 5 + JSZip。`pnpm build` で 318 kB JS + 16 kB CSS を生成（gzip: ~100 kB + 4 kB）。
+> - **ORT 配置**: onnxruntime-web の ONNX 推論セッションは **Pyodide Worker と同一 Worker 内**で動作（別 Worker ではない）。T5-2c の「Phase 3 ではシングル ORT Worker 前提」はこの構成を指す。
+> - **ESLint 未設定**: T4-1c をスキップしたため `pnpm lint` スクリプルが存在しない。Phase 5 開始前に追加しないと T6-2a の CI が壊れる。**Phase 5 の最初のタスクとして対応推奨。**
+> - **未実装の Phase 4 項目**（Phase 5 で拾えるもの）: tiff/jp2 デコード（T4-2b）、ImageViewer ズーム/パン（T4-4a）、Prism.js XML ハイライト（T4-4b）。
+
 ## ゴール
 
 - 初回ロード容量を 50% 以上削減（モデル量子化 + gzip/br 配信）。
@@ -31,8 +37,8 @@ MVP（Phase 4 までで動く状態）をベースに、初回ロード時間・
 
 - [ ] **T5-2a**: `ort.env.wasm.simd = true`, `ort.env.wasm.numThreads = <n>` を COOP/COEP 下で検証。
 - [ ] **T5-2b**: `executionProviders: ['webgpu']` を優先（対応ブラウザのみ）。WebGPU 非対応時は `wasm`。
-- [ ] **T5-2c**: PARSeq 30/50/100 の 3 セッションは **並列 Worker** に分散。
-  - Phase 3 ではシングル ORT Worker 前提だったが、ここで 3 Worker 並列化。
+- [ ] **T5-2c**: PARSeq 30/50/50/100 の 3 セッションを **並列 Worker** に分散。
+  - Phase 3/4 では DEIM + PARSeq 3 セッションをすべて単一の Pyodide Worker 内の ORT で実行している。ここで PARSeq セッションを別 Worker に移動して並列化する。
   - `navigator.hardwareConcurrency` が 4 未満の時は PARSeq 100 のみ別 Worker にする等の階段的戦略。
 
 ### T5-3: 推論パイプラインの並列化
