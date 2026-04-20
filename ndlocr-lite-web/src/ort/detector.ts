@@ -48,7 +48,8 @@ export async function runDeim(
       // OOM: propagate clearly so the caller can free memory and retry.
       throw new RangeError(
         `[detector] Out of memory during DEIM inference. ` +
-          `Free resources or switch to WASM execution provider. Cause: ${err.message}`,
+          `Free resources or switch to WASM execution provider.`,
+        { cause: err },
       );
     }
     throw err;

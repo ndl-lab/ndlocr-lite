@@ -26,9 +26,14 @@ function configureOrtEnv(): void {
   // wasmPaths must end with "/" — Vite copies ORT WASM files to public/ort/.
   ort.env.wasm.wasmPaths = `${import.meta.env.BASE_URL}ort/`;
 
+  // T5-2a: Enable SIMD explicitly (requires COOP/COEP headers already set).
+  ort.env.wasm.simd = true;
+
   const concurrency = typeof navigator !== "undefined"
     ? navigator.hardwareConcurrency ?? 1
     : 1;
+  // T5-2a: Cap at 4 threads; more threads show diminishing returns for these
+  // model sizes and can increase memory pressure on constrained devices.
   ort.env.wasm.numThreads = Math.min(concurrency, 4);
 }
 
@@ -143,4 +148,30 @@ export async function loadAllSessions(
   onProgress?: (id: ModelId, loaded: number, total: number) => void,
 ): Promise<void> {
   await getSession("deim", onProgress ? (l, t) => onProgress("deim", l, t) : undefined);
+}
+
+/**
+ * T5-7b: Release a single ORT InferenceSession to free GPU/WASM memory.
+ * The session will be re-created on next getSession() call.
+ */
+export async function releaseSession(id: ModelId): Promise<void> {
+  const entry = registry.get(id);
+  if (!entry) return;
+  if (entry.session !== null) {
+    try {
+      await entry.session.release?.();
+    } catch {
+      // release() may not be implemented on all EPs; ignore errors.
+    }
+    entry.session = null;
+  }
+  entry.promise = null;
+}
+
+/**
+ * T5-7b: Release all ORT sessions (low-memory mode after OCR completes).
+ * Frees WASM linear memory held by all four model sessions.
+ */
+export async function releaseAllSessions(): Promise<void> {
+  await Promise.all(Array.from(registry.keys()).map(releaseSession));
 }

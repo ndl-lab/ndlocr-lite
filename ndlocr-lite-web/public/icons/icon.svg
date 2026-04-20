@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#1d4ed8"/>
+  <!-- Document outline -->
+  <rect x="108" y="72" width="296" height="368" rx="16" fill="white"/>
+  <!-- Folded corner -->
+  <path d="M344 72 L404 132 L344 132 Z" fill="#bfdbfe"/>
+  <path d="M344 72 L404 132 L344 132 Z" fill="none" stroke="#93c5fd" stroke-width="1"/>
+  <!-- Text lines (representing OCR output) -->
+  <rect x="140" y="180" width="220" height="12" rx="4" fill="#1d4ed8" opacity="0.8"/>
+  <rect x="140" y="208" width="200" height="12" rx="4" fill="#1d4ed8" opacity="0.6"/>
+  <rect x="140" y="236" width="216" height="12" rx="4" fill="#1d4ed8" opacity="0.8"/>
+  <rect x="140" y="264" width="180" height="12" rx="4" fill="#1d4ed8" opacity="0.6"/>
+  <rect x="140" y="292" width="208" height="12" rx="4" fill="#1d4ed8" opacity="0.8"/>
+  <rect x="140" y="320" width="192" height="12" rx="4" fill="#1d4ed8" opacity="0.6"/>
+  <!-- Small "OCR" badge -->
+  <rect x="300" y="356" width="76" height="40" rx="8" fill="#1d4ed8"/>
+  <text x="338" y="383" font-family="monospace" font-size="18" font-weight="bold" fill="white" text-anchor="middle">OCR</text>
+</svg>

@@ -50,7 +50,7 @@ export class OcrClient {
     const manifest = await this.fetchManifest();
     const progressProxy = onProgress
       ? Comlink.proxy(onProgress)
-      : Comlink.proxy((_stage: string, _percent: number) => {});
+      : Comlink.proxy(() => {});
 
     await this.api.init(progressProxy, manifest);
     this.ready = true;
@@ -72,6 +72,17 @@ export class OcrClient {
     // Transfer the ImageBitmap into the worker (zero-copy move).
     const result = await this.api.ocr(Comlink.transfer(bitmap, [bitmap]), imgName, viz);
     return result as OcrResult;
+  }
+
+  /**
+   * T5-7b: Release all ORT InferenceSession objects inside the worker to free
+   * WASM linear memory (~400 MB).  Sessions are re-created lazily on the next
+   * ocr() call, so this is safe to call after processing each image on
+   * low-memory devices.
+   */
+  async releaseOrtSessions(): Promise<void> {
+    if (!this.ready) return;
+    await this.api.releaseOrtSessions();
   }
 
   /** Terminate the underlying worker. The client is unusable after this call. */

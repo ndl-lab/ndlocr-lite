@@ -43,6 +43,11 @@ export function ResultTabs() {
   const [activeTab, setActiveTab] = useState<Tab>("text");
   const lineRefs = useRef<Map<number, HTMLElement>>(new Map());
 
+  // Hooks must be called unconditionally before early returns.
+  const textCopy  = useCopy(result?.text ?? "", lang);
+  const xmlCopy   = useCopy(result?.xml ?? "", lang);
+  const jsonCopy  = useCopy(result ? JSON.stringify(result.json, null, 2) : "", lang);
+
   if (!result) return null;
 
   const { text, xml, json } = result;
@@ -53,10 +58,6 @@ export function ResultTabs() {
     { id: "xml", label: t(lang, "tabXml") },
     { id: "json", label: t(lang, "tabJson") },
   ];
-
-  const textCopy = useCopy(text, lang);
-  const xmlCopy = useCopy(xml, lang);
-  const jsonCopy = useCopy(JSON.stringify(json, null, 2), lang);
 
   const activeCopy = activeTab === "text" ? textCopy : activeTab === "xml" ? xmlCopy : jsonCopy;
 

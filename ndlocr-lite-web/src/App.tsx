@@ -62,13 +62,42 @@ function ErrorDisplay({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+// T5-7c: Warn users on devices with < 4 GB RAM (navigator.deviceMemory API).
+function LowMemoryWarning({ onDismiss }: { onDismiss: () => void }) {
+  const lang = useOcrStore((s) => s.lang);
+  return (
+    <div className="fixed bottom-4 left-4 right-4 z-40 max-w-lg mx-auto">
+      <div className="bg-amber-50 border border-amber-300 rounded-xl shadow-lg p-4 flex gap-3 items-start">
+        <span className="text-amber-500 text-lg shrink-0" aria-hidden="true">⚠</span>
+        <p className="text-sm text-amber-800 flex-1">{t(lang, "lowMemoryWarning")}</p>
+        <button
+          onClick={onDismiss}
+          className="text-xs px-2 py-1 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 shrink-0 font-medium transition-colors"
+        >
+          {t(lang, "lowMemoryDismiss")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const FIRST_VISIT_KEY = "ndlocr_lite_web_visited";
+const LOW_MEMORY_DISMISSED_KEY = "ndlocr_lite_low_mem_dismissed";
+
+/** Returns true when navigator.deviceMemory < 4 GB (Chrome/Edge only). */
+function isLowMemoryDevice(): boolean {
+  const dm = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return dm !== undefined && dm < 4;
+}
 
 export function App() {
   const phase = useOcrStore((s) => s.phase);
   const lang = useOcrStore((s) => s.lang);
   const clientRef = useRef<OcrClient | null>(null);
   const [showModal, setShowModal] = useState(() => !localStorage.getItem(FIRST_VISIT_KEY));
+  const [showLowMemWarning, setShowLowMemWarning] = useState(
+    () => isLowMemoryDevice() && !localStorage.getItem(LOW_MEMORY_DISMISSED_KEY),
+  );
 
   const initClient = useCallback(() => {
     const client = new OcrClient();
@@ -94,21 +123,6 @@ export function App() {
     };
   }, [initClient]);
 
-  // Global paste handler
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      if (phase !== "ready") return;
-      const item = Array.from(e.clipboardData?.items ?? []).find((i) =>
-        i.type.startsWith("image/"),
-      );
-      if (!item) return;
-      const blob = item.getAsFile();
-      if (blob) handleFile(blob, "pasted-image.png");
-    };
-    document.addEventListener("paste", onPaste);
-    return () => document.removeEventListener("paste", onPaste);
-  });
-
   const handleFile = useCallback(async (file: File | Blob, fileName?: string) => {
     const client = clientRef.current;
     if (!client) return;
@@ -129,6 +143,21 @@ export function App() {
       useOcrStore.getState().setError(String(err));
     }
   }, []);
+
+  // Global paste handler — placed after handleFile to avoid use-before-declare
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (phase !== "ready") return;
+      const item = Array.from(e.clipboardData?.items ?? []).find((i) =>
+        i.type.startsWith("image/"),
+      );
+      if (!item) return;
+      const blob = item.getAsFile();
+      if (blob) handleFile(blob, "pasted-image.png");
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  });
 
   const handleRetry = useCallback(() => {
     clientRef.current?.terminate();
@@ -192,6 +221,15 @@ export function App() {
       <Footer />
 
       {showModal && <InitModal onClose={handleDismissModal} />}
+
+      {showLowMemWarning && (
+        <LowMemoryWarning
+          onDismiss={() => {
+            localStorage.setItem(LOW_MEMORY_DISMISSED_KEY, "1");
+            setShowLowMemWarning(false);
+          }}
+        />
+      )}
     </div>
   );
 }

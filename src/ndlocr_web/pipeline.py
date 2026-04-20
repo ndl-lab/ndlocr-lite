@@ -1,6 +1,6 @@
 """Pure-function OCR pipeline for browser (Pyodide) use."""
 from __future__ import annotations
-import json
+import gc
 import io
 from dataclasses import dataclass, field
 import xml.etree.ElementTree as ET
@@ -88,7 +88,7 @@ async def run_ocr_on_image(
         if line_h > line_w:
             tatelinecnt += 1
         alllinecnt += 1
-        lineimg = rgb[ymin:ymin + line_h, xmin:xmin + line_w, :]
+        lineimg = np.ascontiguousarray(rgb[ymin:ymin + line_h, xmin:xmin + line_w, :])
         alllineobj.append(RecogLine(lineimg, idx, pred_char_cnt))
 
     # Fallback: no LINE elements but detections exist
@@ -114,7 +114,16 @@ async def run_ocr_on_image(
                 alllineobj.append(RecogLine(lineimg, idx, det.pred_char_count))
 
     # --- Recognition ---
+    # T5-7a: release the original rgb array reference before recognition so
+    # the GC can reclaim it once process_cascade no longer needs crop views.
+    del rgb
+    gc.collect()
     resultlinesall = await process_cascade(alllineobj, recognizer30, recognizer50, recognizer100)
+    # Release line images after recognition to free memory before building output.
+    for lo in alllineobj:
+        lo.npimg = None
+    del alllineobj
+    gc.collect()
 
     # --- Write strings back into XML tree ---
     resjsonarray = []

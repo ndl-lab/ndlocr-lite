@@ -34,6 +34,9 @@ const translations = {
     initialModalBody:
       "On first use, ~150 MB of AI model files will be downloaded and cached in your browser. After that, the app works fully offline.",
     initialModalOk: "Got it",
+    lowMemoryWarning:
+      "Your device reports less than 4 GB of RAM. Processing may be slow or fail on large images. Consider using a smaller image.",
+    lowMemoryDismiss: "Understood",
   },
   ja: {
     appTitle: "ndlocr-lite web",
@@ -70,6 +73,9 @@ const translations = {
     initialModalBody:
       "初回起動時は約 150 MB の AI モデルファイルをダウンロードしてキャッシュします。以降はオフラインで動作します。",
     initialModalOk: "了解",
+    lowMemoryWarning:
+      "お使いのデバイスの RAM が 4 GB 未満です。大きな画像の処理が遅くなるか失敗する可能性があります。小さな画像をお試しください。",
+    lowMemoryDismiss: "了解",
   },
 } as const;
 

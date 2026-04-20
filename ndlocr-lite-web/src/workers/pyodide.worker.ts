@@ -16,7 +16,7 @@
  */
 
 import * as Comlink from "comlink";
-import { setManifest, getSession } from "../ort/ortSession.js";
+import { setManifest, getSession, releaseAllSessions } from "../ort/ortSession.js";
 import { runDeim } from "../ort/detector.js";
 import { runParseq } from "../ort/recognizer.js";
 import type {
@@ -250,12 +250,30 @@ await micropip.install("/wheels/ndlocr_web-0.1.0-py3-none-any.whl")
       throw new Error("[pyodide.worker] Not initialized. Call init() first.");
     }
 
+    // ── T5-4c: Pre-scale images wider/taller than 2048 px ────────────────
+    // DEIM inputs are fixed at 1024×1024, so anything beyond ~2048 px on
+    // the long edge wastes decode time and memory without improving accuracy.
+    const MAX_SIDE = 2048;
+    let srcBitmap = bitmap;
+    const origW = bitmap.width;
+    const origH = bitmap.height;
+    if (origW > MAX_SIDE || origH > MAX_SIDE) {
+      const scale = MAX_SIDE / Math.max(origW, origH);
+      const scaledW = Math.round(origW * scale);
+      const scaledH = Math.round(origH * scale);
+      const scaleCanvas = new OffscreenCanvas(scaledW, scaledH);
+      const scaleCtx = scaleCanvas.getContext("2d")!;
+      scaleCtx.drawImage(bitmap, 0, 0, scaledW, scaledH);
+      bitmap.close();
+      srcBitmap = await createImageBitmap(scaleCanvas);
+    }
+
     // ── Pixel extraction ──────────────────────────────────────────────────
-    const { width, height } = bitmap;
+    const { width, height } = srcBitmap;
     const canvas = new OffscreenCanvas(width, height);
     const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
+    ctx.drawImage(srcBitmap, 0, 0);
+    srcBitmap.close();
     const { data: rgbaData } = ctx.getImageData(0, 0, width, height);
 
     // ── Python OCR call ───────────────────────────────────────────────────
@@ -280,6 +298,15 @@ await micropip.install("/wheels/ndlocr_web-0.1.0-py3-none-any.whl")
     pyResult.destroy();
 
     return { xml, text, json: jsonPlain, vizPng };
+  },
+
+  /**
+   * T5-7b: Release all ORT InferenceSession objects to free WASM linear
+   * memory.  Call after OCR on low-memory devices.  Sessions are
+   * re-created lazily on the next ocr() call.
+   */
+  async releaseOrtSessions(): Promise<void> {
+    await releaseAllSessions();
   },
 };
 

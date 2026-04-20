@@ -70,7 +70,8 @@ export async function runParseq(
   } catch (err) {
     if (err instanceof RangeError) {
       throw new RangeError(
-        `[recognizer] Out of memory during PARSeq rec${variant} inference. Cause: ${err.message}`,
+        `[recognizer] Out of memory during PARSeq rec${variant} inference.`,
+        { cause: err },
       );
     }
     throw err;

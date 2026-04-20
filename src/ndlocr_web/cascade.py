@@ -1,5 +1,6 @@
 """Serial 3-stage cascade recognition (async, works for sync infer too)."""
 from __future__ import annotations
+import gc
 from dataclasses import dataclass
 import numpy as np
 
@@ -44,7 +45,10 @@ async def process_cascade(
             targetlist50.append(lineobj)
         else:
             lineobj.pred_str = pred_str
+            # T5-7a: free line image after recognition to reduce peak memory.
+            lineobj.npimg = None
             resultall.append(lineobj)
+    gc.collect()
 
     # Stage 50
     for lineobj in targetlist50:
@@ -53,7 +57,9 @@ async def process_cascade(
             targetlist100.append(lineobj)
         else:
             lineobj.pred_str = pred_str
+            lineobj.npimg = None
             resultall.append(lineobj)
+    gc.collect()
 
     # Stage 100
     for lineobj in targetlist100:
@@ -66,18 +72,24 @@ async def process_cascade(
         ):
             base = lineobj.npimg
             half = base.shape[1] // 2
-            targetlist200.append(RecogLine(npimg=base[:, :half, :], idx=lineobj.idx, pred_char_cnt=100))
-            targetlist200.append(RecogLine(npimg=base[:, half:, :], idx=lineobj.idx, pred_char_cnt=100))
+            targetlist200.append(RecogLine(npimg=np.ascontiguousarray(base[:, :half, :]), idx=lineobj.idx, pred_char_cnt=100))
+            targetlist200.append(RecogLine(npimg=np.ascontiguousarray(base[:, half:, :]), idx=lineobj.idx, pred_char_cnt=100))
+            lineobj.npimg = None
         else:
+            lineobj.npimg = None
             resultall.append(lineobj)
+    gc.collect()
 
     # Stage 200 (split halves)
     for i in range(0, len(targetlist200) - 1, 2):
         left = targetlist200[i]
         right = targetlist200[i + 1]
         combined = (await recognizer100.read(left.npimg)) + (await recognizer100.read(right.npimg))
+        left.npimg = None
+        right.npimg = None
         merged = RecogLine(npimg=None, idx=left.idx, pred_char_cnt=100, pred_str=combined)
         resultall.append(merged)
+    gc.collect()
 
     resultall.sort()
     return [obj.pred_str for obj in resultall]
