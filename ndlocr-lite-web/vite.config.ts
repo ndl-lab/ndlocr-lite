@@ -9,7 +9,11 @@ const COOP_COEP_HEADERS = {
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
 
+// Base path: '/' for Cloudflare Pages/local, '/repo-name/' for GitHub Pages.
+const base = process.env.VITE_BASE ?? "/";
+
 export default defineConfig({
+  base,
   plugins: [
     react(),
     tailwindcss(),
@@ -23,14 +27,15 @@ export default defineConfig({
         },
       ],
     }),
-    // T5-6a: PWA Service Worker — precaches UI assets + ORT WASM files.
-    // ONNX model files (~150 MB) and Pyodide packages are NOT precached here;
-    // they are handled by the existing Cache Storage logic in modelCache.ts.
     VitePWA({
+      // Use injectManifest so our custom src/sw.ts handles COOP/COEP headers
+      // required for SharedArrayBuffer on GitHub Pages (which cannot serve
+      // custom HTTP headers).
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
-      // Inject the SW registration snippet into index.html automatically.
       injectRegister: "auto",
-      // T5-6c: App manifest for installable PWA (home screen / desktop).
       manifest: {
         name: "ndlocr-lite web",
         short_name: "ndlocr-lite",
@@ -38,7 +43,7 @@ export default defineConfig({
         theme_color: "#1d4ed8",
         background_color: "#f8fafc",
         display: "standalone",
-        start_url: "/",
+        start_url: base,
         icons: [
           {
             src: "icons/icon.svg",
@@ -48,22 +53,14 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        // Only precache UI bundle + ORT WASM (small files, fast load).
-        // Glob patterns are relative to the build output directory.
+      injectManifest: {
         globPatterns: [
           "**/*.{js,css,html}",
           "ort/*.{wasm,mjs,js}",
           "wheels/*.whl",
           "manifest.json",
         ],
-        // ORT WASM files can exceed Workbox's 2 MB default limit.
         maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
-        // The SW itself must be served with COOP/COEP headers so it can
-        // create SharedArrayBuffer-backed WASM threads.  Vite preview/dev
-        // already set these headers; for production nginx/CDN config see
-        // docs/pyodide-port/phase-6-release.md.
-        navigateFallback: "/index.html",
       },
     }),
   ],

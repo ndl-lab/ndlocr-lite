@@ -13,5 +13,18 @@
 <body>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
+  <!--
+    On the very first visit (no service worker yet), the page loads without
+    COOP/COEP headers and SharedArrayBuffer is unavailable.  Once the SW
+    activates and claims the client, reload so the SW can serve the page with
+    the required headers.
+  -->
+  <script>
+    if ('serviceWorker' in navigator && !crossOriginIsolated) {
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!crossOriginIsolated) window.location.reload();
+      });
+    }
+  </script>
 </body>
 </html>
