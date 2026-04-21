@@ -1,0 +1,39 @@
+name: web-ci
+
+on:
+  pull_request:
+    paths:
+      - "ndlocr-lite-web/**"
+      - ".github/workflows/web-ci.yml"
+
+defaults:
+  run:
+    working-directory: ndlocr-lite-web
+
+jobs:
+  ci:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: ndlocr-lite-web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build

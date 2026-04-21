@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>ORT Smoke Test — ndlocr-lite-web Phase 2</title>
+  <style>
+    body { font-family: monospace; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
+    h1   { font-size: 1.2rem; }
+    #log { white-space: pre-wrap; background: #1a1a1a; border: 1px solid #333; padding: 1rem; border-radius: 4px; height: 60vh; overflow-y: auto; }
+    .ok  { color: #4f4; }
+    .err { color: #f44; }
+    .info{ color: #aaf; }
+    button { margin: 0.5rem 0.25rem; padding: 0.4rem 0.8rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Phase 2 — onnxruntime-web Smoke Test</h1>
+  <p>Tests model loading (from Cache Storage), DEIM and PARSeq inference on synthetic tensors.</p>
+
+  <div>
+    <button id="btn-load">1. Load Manifest &amp; DEIM</button>
+    <button id="btn-deim">2. Run DEIM (synthetic)</button>
+    <button id="btn-parseq">3. Run PARSeq rec30 (synthetic)</button>
+    <button id="btn-all">Run All</button>
+  </div>
+
+  <pre id="log">Ready. Click a button to start.\n</pre>
+
+  <script type="module">
+    // ------------------------------------------------------------------ util
+    const logEl = document.getElementById('log');
+    function log(msg, cls = '') {
+      const line = cls ? `<span class="${cls}">${msg}</span>\n` : msg + '\n';
+      logEl.innerHTML += line;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function ts() { return `[${new Date().toISOString().slice(11,23)}]`; }
+
+    // --------------------------------------------------------- ORT env setup
+    // onnxruntime-web is served from public/ort/ (copied by Vite).
+    // In this plain HTML verify page we load from the same origin.
+    const ORT_BASE = location.origin + location.pathname.replace('verify.html','') + 'ort/';
+
+    // Dynamically import onnxruntime-web ESM (served from public/ort/)
+    let ort;
+    async function loadOrt() {
+      if (ort) return ort;
+      log(`${ts()} Loading onnxruntime-web from ${ORT_BASE}...`, 'info');
+      // ort-wasm-simd-threaded.mjs is the ESM entry when threads are available
+      // Fall back to ort.min.js if not present
+      try {
+        const mod = await import(/* @vite-ignore */ ORT_BASE + 'ort.min.js');
+        ort = mod.default ?? mod;
+      } catch {
+        const mod = await import('onnxruntime-web');
+        ort = mod;
+      }
+      ort.env.wasm.wasmPaths = ORT_BASE;
+      const threads = Math.min(navigator.hardwareConcurrency ?? 1, 4);
+      ort.env.wasm.numThreads = threads;
+      log(`${ts()} ORT loaded. threads=${threads}`, 'ok');
+      return ort;
+    }
+
+    // ---------------------------------------------------------- Manifest
+    let manifest = null;
+    async function loadManifest() {
+      const res = await fetch('./manifest.json');
+      if (!res.ok) throw new Error(`manifest.json ${res.status}`);
+      manifest = await res.json();
+      log(`${ts()} manifest v${manifest.version}, ${manifest.models.length} models`, 'ok');
+      log(`  baseUrl: ${manifest.baseUrl}`);
+    }
+
+    // --------------------------------------------------- Cache Storage helper
+    const CACHE_NAME = 'ndlocr-models-v1';
+    async function loadModel(id, onProgress) {
+      const entry = manifest.models.find(m => m.id === id);
+      if (!entry) throw new Error(`Unknown model id: ${id}`);
+      const url = manifest.baseUrl + entry.file;
+
+      // Try Cache Storage
+      if ('caches' in self) {
+        const cache = await caches.open(CACHE_NAME);
+        const hit = await cache.match(url);
+        if (hit) {
+          log(`${ts()}   [cache hit] ${id}`, 'ok');
+          return hit.arrayBuffer();
+        }
+      }
+
+      // Download with progress
+      log(`${ts()}   Downloading ${id} (${(entry.size/1e6).toFixed(1)} MB)…`, 'info');
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${id}`);
+
+      const reader = res.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.byteLength;
+        onProgress && onProgress(loaded, entry.size);
+      }
+      const total = chunks.reduce((s,c)=>s+c.byteLength,0);
+      const out = new Uint8Array(total);
+      let off = 0;
+      for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+      const buf = out.buffer;
+
+      // Save to cache
+      if ('caches' in self) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(url, new Response(buf.slice(0), {
+          headers: { 'Content-Type': 'application/octet-stream' }
+        }));
+        log(`${ts()}   [cached] ${id}`, 'ok');
+      }
+      return buf;
+    }
+
+    // ----------------------------------------------- Create session
+    let deimSession = null;
+    async function ensureDeimSession() {
+      if (deimSession) return deimSession;
+      const buf = await loadModel('deim', (l,t) => {
+        log(`${ts()}     deim: ${(l/1e6).toFixed(1)}/${(t/1e6).toFixed(1)} MB`);
+      });
+      log(`${ts()}   Creating DEIM InferenceSession…`, 'info');
+      try {
+        deimSession = await ort.InferenceSession.create(buf, {
+          executionProviders: ['webgpu', 'wasm']
+        });
+      } catch {
+        deimSession = await ort.InferenceSession.create(buf, {
+          executionProviders: ['wasm']
+        });
+      }
+      log(`${ts()}   DEIM session OK. inputs=${deimSession.inputNames.join(',')} outputs=${deimSession.outputNames.join(',')}`, 'ok');
+      return deimSession;
+    }
+
+    let rec30Session = null;
+    async function ensureRec30Session() {
+      if (rec30Session) return rec30Session;
+      const buf = await loadModel('rec30', (l,t) => {
+        log(`${ts()}     rec30: ${(l/1e6).toFixed(1)}/${(t/1e6).toFixed(1)} MB`);
+      });
+      log(`${ts()}   Creating PARSeq rec30 InferenceSession…`, 'info');
+      try {
+        rec30Session = await ort.InferenceSession.create(buf, {
+          executionProviders: ['webgpu', 'wasm']
+        });
+      } catch {
+        rec30Session = await ort.InferenceSession.create(buf, {
+          executionProviders: ['wasm']
+        });
+      }
+      log(`${ts()}   rec30 session OK. inputs=${rec30Session.inputNames.join(',')} outputs=${rec30Session.outputNames.join(',')}`, 'ok');
+      return rec30Session;
+    }
+
+    // ----------------------------------------------- DEIM smoke test
+    async function testDeim() {
+      log(`\n${ts()} === DEIM inference (synthetic 1×3×1024×1024) ===`);
+      const sess = await ensureDeimSession();
+      const H = 1024, W = 1024;
+      const images = new Float32Array(1 * 3 * H * W); // zeros
+      const origSizes = new BigInt64Array([BigInt(H), BigInt(W)]);
+      const feeds = {
+        images: new ort.Tensor('float32', images, [1, 3, H, W]),
+        orig_target_sizes: new ort.Tensor('int64', origSizes, [1, 2]),
+      };
+      const t0 = performance.now();
+      const results = await sess.run(feeds);
+      const dt = (performance.now() - t0).toFixed(0);
+      log(`${ts()} DEIM ran in ${dt} ms`, 'ok');
+      for (const name of sess.outputNames) {
+        const t = results[name];
+        log(`  output["${name}"]: shape=[${t.dims.join(',')}] dtype=${t.type}`);
+      }
+    }
+
+    // ----------------------------------------------- PARSeq smoke test
+    async function testParseq() {
+      log(`\n${ts()} === PARSeq rec30 inference (synthetic 1×3×16×256) ===`);
+      const sess = await ensureRec30Session();
+      const H = 16, W = 256;
+      const input = new Float32Array(1 * 3 * H * W); // zeros
+      const feeds = {
+        input: new ort.Tensor('float32', input, [1, 3, H, W]),
+      };
+      const t0 = performance.now();
+      const results = await sess.run(feeds);
+      const dt = (performance.now() - t0).toFixed(0);
+      log(`${ts()} PARSeq rec30 ran in ${dt} ms`, 'ok');
+      for (const name of sess.outputNames) {
+        const t = results[name];
+        log(`  output["${name}"]: shape=[${t.dims.join(',')}] dtype=${t.type}`);
+      }
+    }
+
+    // ----------------------------------------------- Button wiring
+    async function runStep(label, fn) {
+      try {
+        await fn();
+      } catch (e) {
+        log(`${ts()} ERROR in ${label}: ${e.message || e}`, 'err');
+        console.error(e);
+      }
+    }
+
+    document.getElementById('btn-load').onclick = () => runStep('load', async () => {
+      await loadOrt();
+      await loadManifest();
+      await ensureDeimSession();
+    });
+
+    document.getElementById('btn-deim').onclick = () => runStep('deim', async () => {
+      await loadOrt();
+      if (!manifest) await loadManifest();
+      await testDeim();
+    });
+
+    document.getElementById('btn-parseq').onclick = () => runStep('parseq', async () => {
+      await loadOrt();
+      if (!manifest) await loadManifest();
+      await testParseq();
+    });
+
+    document.getElementById('btn-all').onclick = async () => {
+      await runStep('load', async () => { await loadOrt(); await loadManifest(); await ensureDeimSession(); });
+      await runStep('deim', testDeim);
+      await runStep('parseq', testParseq);
+      log(`\n${ts()} === All done ===`, 'ok');
+    };
+  </script>
+</body>
+</html>

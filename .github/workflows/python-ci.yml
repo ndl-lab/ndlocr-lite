@@ -1,0 +1,43 @@
+name: python-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/python-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "tests/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install test dependencies
+        run: |
+          pip install --upgrade pip
+          # Core ndlocr_web deps (no OpenCV, no onnxruntime)
+          pip install numpy Pillow lxml networkx pyyaml
+          # Test runner
+          pip install pytest
+
+      - name: Run pytest (test_imgops.py)
+        run: pytest tests/test_imgops.py -v
+
+      - name: Run pyodide smoke test
+        run: python tests/pyodide_smoke.py

@@ -1,0 +1,44 @@
+{
+  "name": "ndlocr-lite-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "comlink": "^4.4.1",
+    "idb-keyval": "^6.2.1",
+    "jszip": "^3.10.1",
+    "onnxruntime-web": "^1.22.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "coi-serviceworker": "^0.1.7",
+    "eslint": "^10.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.58.2",
+    "vite": "^6.3.2",
+    "vite-plugin-pwa": "^1.2.0",
+    "vite-plugin-static-copy": "^2.3.0",
+    "workbox-precaching": "^7.4.0"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

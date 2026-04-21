@@ -1,0 +1,66 @@
+name: pages-deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ndlocr-lite-web/**"
+      - ".github/workflows/pages-deploy.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: ndlocr-lite-web
+
+# Allow one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: ndlocr-lite-web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          # Sub-path for GitHub Pages (/<repo-name>/).
+          # Change this if the repository name differs.
+          VITE_BASE: /ndlocr-lite/
+          VITE_MODEL_MANIFEST_URL: ${{ vars.VITE_MODEL_MANIFEST_URL }}
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ndlocr-lite-web/dist
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

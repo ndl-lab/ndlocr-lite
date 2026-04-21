@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ndlocr-lite web</title>
+  <!-- T5-6c: PWA meta tags -->
+  <meta name="theme-color" content="#1d4ed8" />
+  <meta name="description" content="National Diet Library OCR — runs entirely in your browser, no server needed." />
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+  <link rel="apple-touch-icon" href="/icons/icon.svg" />
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+  <!--
+    On the very first visit (no service worker yet), the page loads without
+    COOP/COEP headers and SharedArrayBuffer is unavailable.  Once the SW
+    activates and claims the client, reload so the SW can serve the page with
+    the required headers.
+  -->
+  <script>
+    if ('serviceWorker' in navigator && !crossOriginIsolated) {
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!crossOriginIsolated) window.location.reload();
+      });
+    }
+  </script>
+</body>
+</html>

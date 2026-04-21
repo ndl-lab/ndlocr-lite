@@ -1,0 +1,68 @@
+name: web-deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ndlocr-lite-web/**"
+      - ".github/workflows/web-deploy.yml"
+
+defaults:
+  run:
+    working-directory: ndlocr-lite-web
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: ndlocr-lite-web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          # Override the manifest URL to point at the latest GitHub Releases tag.
+          # Set VITE_MODEL_MANIFEST_URL in the repository secrets/variables if
+          # the models are hosted somewhere other than the bundled manifest.json.
+          VITE_MODEL_MANIFEST_URL: ${{ vars.VITE_MODEL_MANIFEST_URL }}
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy ndlocr-lite-web/dist --project-name=ndlocr-lite-web --commit-dirty=true
+
+      # Verify that the deployed site serves the required COOP/COEP headers.
+      # Replace the URL below with the actual Cloudflare Pages production URL.
+      - name: Verify COOP/COEP headers
+        run: |
+          DEPLOY_URL="${{ vars.DEPLOY_URL }}"
+          if [ -z "$DEPLOY_URL" ]; then
+            echo "DEPLOY_URL not set — skipping header verification."
+            exit 0
+          fi
+          echo "Checking headers at $DEPLOY_URL"
+          HEADERS=$(curl -sI "$DEPLOY_URL")
+          echo "$HEADERS"
+          echo "$HEADERS" | grep -i "Cross-Origin-Opener-Policy: same-origin" \
+            || (echo "ERROR: Missing COOP header" && exit 1)
+          echo "$HEADERS" | grep -i "Cross-Origin-Embedder-Policy: require-corp" \
+            || (echo "ERROR: Missing COEP header" && exit 1)
+          echo "COOP/COEP headers verified."
