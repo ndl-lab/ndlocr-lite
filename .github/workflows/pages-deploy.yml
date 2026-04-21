@@ -3,7 +3,7 @@ name: pages-deploy
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - "ndlocr-lite-web/**"
       - ".github/workflows/pages-deploy.yml"
