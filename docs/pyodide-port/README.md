@@ -34,7 +34,7 @@ Phase 3/4/5 までの実装構成:
 | 3 | Pyodide 統合 & Web Worker 化 | [phase-3-pyodide-integration.md](./phase-3-pyodide-integration.md) | Worker 化、Python ⇄ JS RPC、進捗配信 | ✅ 完了 |
 | 4 | フロントエンド UI 実装 | [phase-4-frontend-ui.md](./phase-4-frontend-ui.md) | D&D / 結果表示 / DL / 可視化 | ✅ 完了（2026-04-19） |
 | 5 | パフォーマンス / サイズ最適化 | [phase-5-performance.md](./phase-5-performance.md) | 量子化 / WebGPU / 並列 / PWA | 🟡 主要最適化実装済み（2026-04-20）、量子化 / 並列 Worker / Playwright 自動計測は残タスク |
-| 6 | 配布・CI/CD・ドキュメント | [phase-6-release.md](./phase-6-release.md) | 本番配信、GitHub Actions、ライセンス表記 | ⏳ 未着手 |
+| 6 | 配布・CI/CD・ドキュメント | [phase-6-release.md](./phase-6-release.md) | 本番配信、GitHub Actions、ライセンス表記 | ✅ 完了（2026-04-21）|
 | ベンチマーク | [benchmark.md](./benchmark.md) | Phase 4 baseline + Phase 5 目標値 / 進捗表 | — |
 
 ## 進め方のガイドライン

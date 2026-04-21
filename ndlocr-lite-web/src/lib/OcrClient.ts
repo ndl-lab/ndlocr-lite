@@ -97,7 +97,12 @@ export class OcrClient {
   // ---------------------------------------------------------------------------
 
   private async fetchManifest(): Promise<ModelManifest> {
-    const url = `${import.meta.env.BASE_URL}manifest.json`;
+    // VITE_MODEL_MANIFEST_URL lets CI/CD point at a specific GitHub Releases
+    // manifest (e.g. for a versioned model tag).  Falls back to the bundled
+    // manifest.json served alongside the app.
+    const url =
+      (import.meta.env.VITE_MODEL_MANIFEST_URL as string | undefined) ||
+      `${import.meta.env.BASE_URL}manifest.json`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(`[OcrClient] Failed to fetch manifest: ${res.status} ${res.statusText}`);

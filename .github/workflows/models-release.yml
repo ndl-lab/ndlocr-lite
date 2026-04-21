@@ -1,0 +1,89 @@
+name: models-release
+
+# Triggered by pushing a tag of the form models-vYYYY.MM.DD (or models-vX.Y.Z).
+# Creates a GitHub Release and uploads:
+#   - The four ONNX model files (placed in src/model/ before tagging)
+#   - manifest.json (with SHA-256 and URLs pointing at the new release)
+#   - ndlocr_web Python wheel (for micropip.install() in the browser worker)
+#
+# Prerequisites:
+#   1. Place the four .onnx files in src/model/ locally.
+#   2. Update ndlocr-lite-web/public/manifest.json with the new tag/version,
+#      correct SHA-256 values and file sizes.
+#   3. Commit, push, then tag: git tag models-v<date> && git push origin models-v<date>
+
+on:
+  push:
+    tags:
+      - "models-v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build ndlocr_web wheel
+        run: bash scripts/build-wheel.sh
+
+      # Compute SHA-256 for each model file and print a summary.
+      # The manifest.json must already contain the correct hashes committed to
+      # the repo; this step prints them for audit purposes only.
+      - name: Print model SHA-256 checksums
+        run: |
+          echo "=== Model SHA-256 checksums ==="
+          for f in src/model/*.onnx; do
+            [ -f "$f" ] || continue
+            sha256sum "$f"
+          done
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Models ${{ github.ref_name }}" \
+            --notes "ONNX model files for ndlocr-lite-web.
+
+          These files are fetched and cached by the browser app on first use.
+          See \`ndlocr-lite-web/public/manifest.json\` for SHA-256 checksums.
+
+          ## Included files
+          - \`deim-s-1024x1024.onnx\` — layout detection (DEIM v2)
+          - \`parseq-ndl-16x256-30-tiny-*.onnx\` — text recognition 30 px
+          - \`parseq-ndl-16x384-50-tiny-*.onnx\` — text recognition 50 px
+          - \`parseq-ndl-16x768-100-tiny-*.onnx\` — text recognition 100 px
+          - \`manifest.json\` — model manifest with SHA-256 and download URLs
+          - \`ndlocr_web-*.whl\` — Python package for Pyodide (micropip)"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload ONNX models
+        run: |
+          for f in src/model/*.onnx; do
+            [ -f "$f" ] || { echo "WARNING: no .onnx files found in src/model/"; break; }
+            gh release upload "${{ github.ref_name }}" "$f"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload manifest.json
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            ndlocr-lite-web/public/manifest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload ndlocr_web wheel
+        run: |
+          whl=$(ls ndlocr-lite-web/public/wheels/ndlocr_web-*.whl | head -1)
+          gh release upload "${{ github.ref_name }}" "$whl"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

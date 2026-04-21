@@ -37,6 +37,8 @@ const translations = {
     lowMemoryWarning:
       "Your device reports less than 4 GB of RAM. Processing may be slow or fail on large images. Consider using a smaller image.",
     lowMemoryDismiss: "Understood",
+    licensesTitle: "Licenses",
+    licensesClose: "Close",
   },
   ja: {
     appTitle: "ndlocr-lite web",
@@ -76,6 +78,8 @@ const translations = {
     lowMemoryWarning:
       "お使いのデバイスの RAM が 4 GB 未満です。大きな画像の処理が遅くなるか失敗する可能性があります。小さな画像をお試しください。",
     lowMemoryDismiss: "了解",
+    licensesTitle: "ライセンス一覧",
+    licensesClose: "閉じる",
   },
 } as const;
 
