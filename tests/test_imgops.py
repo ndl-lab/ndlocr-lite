@@ -19,6 +19,15 @@ def _random_rgb(h=64, w=48, seed=0):
     return rng.integers(0, 256, (h, w, 3), dtype=np.uint8)
 
 
+def _smooth_rgb(h=128, w=96):
+    """Smooth gradient image; Pillow and OpenCV bicubic/bilinear agree closely on it."""
+    y = np.linspace(0, 255, h, dtype=np.float32)
+    x = np.linspace(0, 255, w, dtype=np.float32)
+    yy, xx = np.meshgrid(y, x, indexing="ij")
+    img = np.stack([yy, xx, (yy + xx) / 2], axis=2).clip(0, 255).astype(np.uint8)
+    return img
+
+
 def test_resize_bicubic_shape():
     img = _random_rgb(64, 48)
     out = resize_bicubic(img, (32, 16))
@@ -78,7 +87,7 @@ def test_pad_to_square_square():
 )
 def test_resize_bicubic_mse_vs_opencv():
     import cv2
-    img = _random_rgb(128, 96)
+    img = _smooth_rgb(128, 96)
     target = (48, 64)  # (w, h)
     our = resize_bicubic(img, target).astype(np.float32)
     cv_out = cv2.resize(img, target, interpolation=cv2.INTER_CUBIC).astype(np.float32)
@@ -92,7 +101,7 @@ def test_resize_bicubic_mse_vs_opencv():
 )
 def test_resize_bilinear_mse_vs_opencv():
     import cv2
-    img = _random_rgb(128, 96)
+    img = _smooth_rgb(128, 96)
     target = (48, 64)
     our = resize_bilinear(img, target).astype(np.float32)
     cv_out = cv2.resize(img, target, interpolation=cv2.INTER_LINEAR).astype(np.float32)

@@ -1,4 +1,5 @@
 """T1-6a: Smoke test - verify pipeline runs with dummy infer functions (no real models)."""
+import asyncio
 import sys
 import os
 import numpy as np
@@ -45,14 +46,14 @@ def main():
     )
 
     img = np.zeros((100, 100, 3), dtype=np.uint8)
-    result = run_ocr_on_image(
+    result = asyncio.run(run_ocr_on_image(
         img,
         detector=dummy_det,
         recognizer30=dummy_rec,
         recognizer50=dummy_rec,
         recognizer100=dummy_rec,
         img_name="smoke.jpg",
-    )
+    ))
 
     assert isinstance(result.xml, str), "xml must be str"
     assert isinstance(result.text, str), "text must be str"

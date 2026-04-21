@@ -116,6 +116,7 @@ async def run_ocr_on_image(
     # --- Recognition ---
     # T5-7a: release the original rgb array reference before recognition so
     # the GC can reclaim it once process_cascade no longer needs crop views.
+    rgb_for_viz = rgb if viz else None
     del rgb
     gc.collect()
     resultlinesall = await process_cascade(alllineobj, recognizer30, recognizer50, recognizer100)
@@ -173,8 +174,8 @@ async def run_ocr_on_image(
 
     # --- Optional viz ---
     viz_png: bytes | None = None
-    if viz:
-        pil = Image.fromarray(rgb)
+    if viz and rgb_for_viz is not None:
+        pil = Image.fromarray(rgb_for_viz)
         draw = ImageDraw.Draw(pil)
         for det in detections:
             x1, y1, x2, y2 = det.box
@@ -182,5 +183,6 @@ async def run_ocr_on_image(
         buf = io.BytesIO()
         pil.save(buf, format="PNG")
         viz_png = buf.getvalue()
+        del rgb_for_viz
 
     return OcrResult(xml=allxmlstr, text=text_out, json=json_out, viz_png=viz_png)
