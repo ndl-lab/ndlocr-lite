@@ -191,7 +191,7 @@ const workerApi = {
 
     // ── Stage 2: Scientific packages ──────────────────────────────────────
     onProgress("packages", 0);
-    await pyodide.loadPackage(["numpy", "Pillow", "lxml", "networkx", "pyyaml"]);
+    await pyodide.loadPackage(["micropip", "numpy", "Pillow", "lxml", "networkx", "pyyaml"]);
     onProgress("packages", 100);
 
     // ── Stage 3: ndlocr_web wheel ─────────────────────────────────────────
