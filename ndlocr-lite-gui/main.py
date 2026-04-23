@@ -854,9 +854,9 @@ def main(page: ft.Page):
     parser.add_argument("--det-conf-threshold", type=float, required=False, default=0.25)
     parser.add_argument("--det-iou-threshold", type=float, required=False, default=0.2)
 
-    parser.add_argument("--rec-weights30", type=str, required=False, help="Path to parseq-tiny onnx file", default="./src/model/parseq-ndl-16x256-30-tiny-192epoch-tegaki3.onnx")
-    parser.add_argument("--rec-weights50", type=str, required=False, help="Path to parseq-tiny onnx file", default="./src/model/parseq-ndl-16x384-50-tiny-146epoch-tegaki2.onnx")
-    parser.add_argument("--rec-weights", type=str, required=False, help="Path to parseq-tiny onnx file", default="./src/model/parseq-ndl-16x768-100-tiny-165epoch-tegaki2.onnx")
+    parser.add_argument("--rec-weights30", type=str, required=False, help="Path to parseq-tiny onnx file", default="./src/model/parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx")
+    parser.add_argument("--rec-weights50", type=str, required=False, help="Path to parseq-tiny onnx file", default="./src/model/parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx")
+    parser.add_argument("--rec-weights", type=str, required=False, help="Path to parseq-tiny onnx file", default="./src/model/parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx")
     parser.add_argument("--rec-classes", type=str, required=False, help="Path to list of class in yaml file", default="./src/config/NDLmoji.yaml")
     parser.add_argument("--device", type=str, required=False, help="Device use (cpu or cuda)", choices=["cpu", "cuda"], default="cpu")
     args = parser.parse_args()
