@@ -1210,7 +1210,7 @@ def main(page: ft.Page):
                         ext = filename.split(".")[-1].lower()
 
                         # 対象の拡張子かチェック
-                        if ext in ["jpg", "png", "tiff", "jp2", "tif", "jpeg", "bmp"]:
+                        if ext in ["jpg", "png", "tiff", "jp2", "tif", "jpeg", "bmp","webp"]:
                             all_files_to_process.append((full_path, "image"))
                         elif ext == "pdf":
                             all_files_to_process.append((full_path, "pdf"))
