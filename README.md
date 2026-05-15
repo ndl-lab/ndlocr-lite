@@ -131,6 +131,7 @@ Maeda, K., & Okazaki, N. JaWildText: A Benchmark for Vision-Language Models on J
 
 横書き平均CER : 0.264 (対象: 768 ファイル)
 
+※CER(Character Error Rate、文字誤り率):0から1までの範囲を取り、0に近いほど高い性能を表すスコア
 
 ## モデルの再学習及びカスタマイズについて（開発者向け情報）
 
