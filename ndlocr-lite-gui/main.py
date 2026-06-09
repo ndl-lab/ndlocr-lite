@@ -15,6 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import time
 import json
+import threading
 import shutil
 import argparse
 import yaml
@@ -915,13 +916,14 @@ def main(page: ft.Page):
     origin_recognizer=ocr.get_recognizer(args=args)
     origin_recognizer30=ocr.get_recognizer(args=args,weights_path=args.rec_weights30)
     origin_recognizer50=ocr.get_recognizer(args=args,weights_path=args.rec_weights50)
-
+    
     def renderui():
         page.clean()
         page.update()
         inputpathlist=[]
         visualizepathlist=[]
         outputtxtlist=[]
+        ocr_cancel_event=threading.Event()
 
         def create_pdf_func(outputpath:str,img:object,bboxlistobj:dict,viztxtflag:bool):
             import reportlab
@@ -965,7 +967,7 @@ def main(page: ft.Page):
             c.save()
         
 
-        def parts_control(flag:bool):
+        def parts_control(flag:bool,allow_ocr_cancel:bool=False):
             file_upload_btn.disabled=flag
             directory_upload_btn.disabled=flag
             directory_output_btn.disabled=flag
@@ -977,9 +979,18 @@ def main(page: ft.Page):
             crop_btn.disabled=flag
             cap_btn.disabled=flag
             localebutton.disabled=flag
+            stop_ocr_btn.disabled=not (flag and allow_ocr_cancel)
             
-
+        def request_ocr_cancel(e):
+            if ocr_cancel_event.is_set():
+                return
+            ocr_cancel_event.set()
+            stop_ocr_btn.disabled=True
+            progressmessage.value=TRANSLATIONS["main_ocr_cancel_requested"][config_obj["langcode"]]
+            page.update()
+        
         def ocr_button_result(e):
+            ocr_cancel_event.clear()
             progressbar.value=0
             outputpath=selected_output_path.value
             nonlocal inputpathlist,outputtxtlist,visualizepathlist,preview_index,args
@@ -987,7 +998,7 @@ def main(page: ft.Page):
             nonlocal origin_detector
 
             preview_index=0
-            parts_control(True)
+            parts_control(True,allow_ocr_cancel=True)
             page.update()
             progressmessage.value="Start"
             progressmessage.update()
@@ -1003,7 +1014,12 @@ def main(page: ft.Page):
                 visualizepathlist.clear()
                 visualizepathlist=[]
                 alljsonobjlist=[]
+                completed_count=0
+                cancelled=False
                 for idx,inputpath in enumerate(inputpathlist):
+                    if ocr_cancel_event.is_set():
+                        cancelled=True
+                        break
                     progressmessage.value=inputpath
                     progressmessage.update()
                     pil_image = Image.open(inputpath).convert('RGB')
@@ -1019,6 +1035,9 @@ def main(page: ft.Page):
                     for img,imgname in zip(inputdivlist,imgnamelist):
                         img_h,img_w=img.shape[:2]
                         detections,classeslist=ocr.process_detector(detector=origin_detector,inputname=imgname,npimage=img,outputpath=outputpath,issaveimg=False)
+                        if ocr_cancel_event.is_set():
+                            cancelled=True
+                            break
                         e1=time.time()
                         print("layout detection Done!",e1-start)
                         #print(detections)
@@ -1056,6 +1075,9 @@ def main(page: ft.Page):
                             linerecogobj = RecogLine(lineimg,idx,pred_char_cnt)
                             alllinerecogobj.append(linerecogobj)
                         resultlinesall=process_cascade(alllinerecogobj,recognizer30=origin_recognizer30,recognizer50=origin_recognizer50,recognizer100=origin_recognizer)
+                        if ocr_cancel_event.is_set():
+                            cancelled=True
+                            break
                         alltextlist.append("\n".join(resultlinesall))
                         for idx,lineobj in enumerate(root.findall(".//LINE")):
                             lineobj.set("STRING",resultlinesall[idx])
@@ -1072,6 +1094,8 @@ def main(page: ft.Page):
                             resjsonarray.append(jsonobj)
                         allxmlstr+=(ET.tostring(root.find("PAGE"), encoding='unicode')+"\n")
                         e2=time.time()
+                    if cancelled:
+                        break
                     allxmlstr+="</OCRDATASET>"
                     if alllinecnt==0 or tatelinecnt/alllinecnt>0.5:
                         alltextlist=alltextlist[::-1]
@@ -1103,7 +1127,7 @@ def main(page: ft.Page):
                             wtf.write("\n".join(alltextlist))
                     if chkbx_pdf.value:
                         create_pdf_func(os.path.join(outputpath,os.path.splitext(os.path.basename(inputpath))[0]+".pdf"),img,resjsonarray,chkbx_pdf_viztxt.value)
-                        
+                    completed_count+=1
                     progressbar.value+=1/allsum
                     preview_prev_btn.disabled=False
                     preview_next_btn.disabled=False
@@ -1116,7 +1140,11 @@ def main(page: ft.Page):
                         current_visualizeimgname.value=os.path.basename(inputpathlist[preview_index])
                     preview_image.update()
                     page.update()
-                if config_obj["langcode"]=="ja":
+                if cancelled:
+                    progressmessage.value=TRANSLATIONS["main_ocr_cancelled"][config_obj["langcode"]].format(
+                        completed=completed_count,total=allsum,elapsed=time.time()-allstart
+                    )
+                elif config_obj["langcode"]=="ja":
                     progressmessage.value="{} 画像OCR完了 / 所要時間 {:.2f} 秒".format(allsum,time.time()-allstart)
                 else:
                     progressmessage.value="{} images completed / Total time {:.2f} sec".format(allsum,time.time()-allstart)
@@ -1130,6 +1158,7 @@ def main(page: ft.Page):
                 progressmessage.value=e
                 progressmessage.update()
             finally:
+                ocr_cancel_event.clear()
                 parts_control(False)
                 page.update()
 
@@ -1392,6 +1421,10 @@ def main(page: ft.Page):
                                         padding=30,
                                         shape=ft.RoundedRectangleBorder(radius=10)),
                                     disabled=True)
+        stop_ocr_btn=ft.ElevatedButton(
+                                    text=TRANSLATIONS["main_stop_ocr_btn"][config_obj["langcode"]],
+                                    on_click=request_ocr_cancel,
+                                    disabled=True)
         preview_image_col = ft.Column(
             controls=[preview_image],
             width=400,
@@ -1492,6 +1525,7 @@ def main(page: ft.Page):
             ft.Divider(),
             ft.Row(
                 [ocr_btn,
+                stop_ocr_btn,
                 crop_btn,
                 ft.Column([chkbx_visualize,customize_btn
                             ]),
