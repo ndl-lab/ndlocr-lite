@@ -90,7 +90,7 @@ def get_detector(args):
     weights_path = args.det_weights
     classes_path = args.det_classes
     assert os.path.isfile(weights_path), f"There's no weight file with name {weights_path}"
-    assert os.path.isfile(classes_path), f"There's no classes file with name {weights_path}"
+    assert os.path.isfile(classes_path), f"There's no classes file with name {classes_path}"
     detector = DEIM(model_path=weights_path,
                       class_mapping_path=classes_path,
                       score_threshold=args.det_score_threshold,
@@ -105,7 +105,7 @@ def get_recognizer(args,weights_path=None):
     classes_path = args.rec_classes
 
     assert os.path.isfile(weights_path), f"There's no weight file with name {weights_path}"
-    assert os.path.isfile(classes_path), f"There's no classes file with name {weights_path}"
+    assert os.path.isfile(classes_path), f"There's no classes file with name {classes_path}"
 
     charobj=None
     with open(classes_path,encoding="utf-8") as f:
