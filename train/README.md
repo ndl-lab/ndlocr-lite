@@ -141,3 +141,33 @@ python3 convert2onnx.py
 モデルに対応するonnxファイルが生成されます。
 
 NDLOCR-Liteで利用する場合は、--rec-weightsオプションでonnxファイルのパスを指定してください。
+
+## pytorchのモデルチェックポイント
+### ver1.0/ver1.1
+#### DEIMv2
+(準備中)
+
+#### PARSeq
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1_models/parseq-ndl-16x256-30-tiny-192epoch-tegaki3.ckpt
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1_models/parseq-ndl-16x384-50-tiny-146epoch-tegaki2.ckpt
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1_models/parseq-ndl-16x768-100-tiny-165epoch-tegaki2.ckpt
+
+
+
+### ver1.2
+#### DEIMv2
+(準備中)
+
+#### PARSeq
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1.2_models/parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.ckpt
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1.2_models/parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.ckpt
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1.2_models/parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.ckpt
+
+
+
