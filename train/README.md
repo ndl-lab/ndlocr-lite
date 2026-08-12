@@ -145,7 +145,14 @@ NDLOCR-Liteで利用する場合は、--rec-weightsオプションでonnxファ�
 ## pytorchチェックポイントファイルの提供
 ### ■NDLOCR-Lite ver1.0/ver1.1
 #### DEIMv2
-(準備中)
+* 上記「学習(1)」に対応
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1_models/deimv2-phase1-checkpoint0119.pth
+
+* 上記「学習(2)」に対応
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1_models/deimv2-phase2-checkpoint0064.pth
+
 
 #### PARSeq
 
@@ -158,8 +165,6 @@ https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1_models/parseq-ndl-16x768-100-tiny
 
 
 ### ■NDLOCR-Lite ver1.2
-#### DEIMv2
-(準備中)
 
 #### PARSeq
 
