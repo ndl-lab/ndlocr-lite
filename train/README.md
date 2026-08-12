@@ -142,8 +142,8 @@ python3 convert2onnx.py
 
 NDLOCR-Liteで利用する場合は、--rec-weightsオプションでonnxファイルのパスを指定してください。
 
-## pytorchのモデルチェックポイント
-### ver1.0/ver1.1
+## pytorchチェックポイントファイルの提供
+### ■NDLOCR-Lite ver1.0/ver1.1
 #### DEIMv2
 (準備中)
 
@@ -157,7 +157,7 @@ https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1_models/parseq-ndl-16x768-100-tiny
 
 
 
-### ver1.2
+### ■NDLOCR-Lite ver1.2
 #### DEIMv2
 (準備中)
 
