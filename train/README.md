@@ -142,7 +142,7 @@ python3 convert2onnx.py
 
 NDLOCR-Liteで利用する場合は、--rec-weightsオプションでonnxファイルのパスを指定してください。
 
-## pytorchチェックポイントファイルの提供
+## pytorchチェックポイントファイルの提供（ファインチューニング用途を想定）
 ### ■NDLOCR-Lite ver1.0/ver1.1
 #### DEIMv2
 * 上記「学習(1)」に対応
