@@ -26,6 +26,10 @@ class DEIM:
         self.colorlist=[(0, 0, 0), (255, 0, 0), (0, 0, 142), (0, 0, 230), (106, 0, 228),
                         (0, 60, 100), (0, 80, 100), (0, 0, 70), (0, 0, 192), (250, 170, 30),
                         (100, 170, 30), (220, 220, 0), (175, 116, 175), (250, 0, 30),(165, 42, 42), (255, 77, 255),(255,0,0)]
+        self._mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        self._inv_std = np.reciprocal(
+            np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        )
         self.create_session()
 
     def create_session(self) -> None:
@@ -61,15 +65,11 @@ class DEIM:
         #resized=cv2.resize(paddedimg,(self.input_width, self.input_height),interpolation=cv2.INTER_AREA)
         pil_image = Image.fromarray(paddedimg)
         pil_resized = pil_image.resize((self.input_width, self.input_height))
-        resized = np.array(pil_resized)
-        input_image=resized/255.0
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        input_image-=mean
-        input_image/=std
-        input_image = input_image.transpose(2,0,1)
-        input_tensor = input_image[np.newaxis, :, :, :].astype(np.float32)
-        return input_tensor
+        input_image = np.asarray(pil_resized, dtype=np.float32)
+        input_image *= np.float32(1.0 / 255.0)
+        input_image -= self._mean
+        input_image *= self._inv_std
+        return np.ascontiguousarray(input_image.transpose(2,0,1)[np.newaxis, :, :, :])
     
     def xywh2xyxy(self, x):
         # Convert bounding box (x, y, w, h) to bounding box (x1, y1, x2, y2)

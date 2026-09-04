@@ -3,12 +3,17 @@ name = "ndlocr-lite-gui"
 version = "1.0.0"
 description = ""
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 authors = [
     { name = "National_Diet_Library", email = "lab@ndl.go.jp" }
 ]
 
 dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+dev = [
+    "flet[all,test]==0.86.5",
+]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
@@ -30,18 +35,28 @@ copyright = "Copyright (C) 2025 by National Diet Library"
 
 [tool.flet.app]
 path = "."
+exclude = [".flet", ".venv", "__pycache__", "tests", ".git"]
+
+# OpenCV imports cv2/config.py dynamically by filename. Flet 0.86 compiles and
+# removes package sources by default, which makes cv2 fail at startup.
+[tool.flet.compile]
+app = true
+packages = false
 
 [tool.uv]
 dev-dependencies = [
-    "flet[all]==0.27.6",
+    "flet[all,test]==0.86.5",
 ]
 
 [tool.poetry]
 package-mode = false
 
 [tool.poetry.group.dev.dependencies]
-flet = {extras = ["all"], version = "0.27.6"}
+flet = {extras = ["all", "test"], version = "0.86.5"}
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [tool.flet.flutter.pubspec.dependency_overrides]
-webview_flutter_android = "3.16.9"
-serious_python="0.9.6"
+connectivity_plus="6.0.5"

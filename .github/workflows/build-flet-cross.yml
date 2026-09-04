@@ -45,7 +45,7 @@ jobs:
           python-version: '3.12' 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: '3.44.8'
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
@@ -61,6 +61,7 @@ jobs:
         run: |
           cd ndlocr-lite-gui
           cp -r ../src .
+          python src/set_version.py ${{github.ref_name}}
           EXTRA_ARGS=""
           # Intel Macの場合のみ引数を追加する処理
           if [ "${{ matrix.runs-on }}" = "macos-15-intel" ]; then
@@ -74,6 +75,7 @@ jobs:
         run: |
           cd ndlocr-lite-gui
           echo D | xcopy ..\src .\src /E
+          python src\set_version.py ${{github.ref_name}}
           set PYTHONUTF8=1
           flet build ${{ matrix.target-platform }} --output ..\${{ matrix.target-platform }} --build-version ${{github.ref_name}}
           copy main.py ..\${{ matrix.target-platform }}

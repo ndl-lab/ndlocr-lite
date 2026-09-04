@@ -860,7 +860,7 @@ def convert_to_xml_string3(img_w, img_h, img_path, classes, result,
                         if c_id == tb_cls_id:  # write as Line_main
                             x, y, w, h = make_bbox_from_poly(tb_polygons[i])
                             if w >= min_bbox_size and h >= min_bbox_size:
-                                s += f'      <LINE TYPE = "{name_to_org_name(classes[0])}" X = "{x}" Y = "{y}" WIDTH = "{w}" HEIGHT = "{h}" CONF = "{conf:0.3f}"PRED_CHAR_CNT="{pred_char_cnt:0.3f}"></LINE>\n'
+                                s += f'      <LINE TYPE = "{name_to_org_name(classes[0])}" X = "{x}" Y = "{y}" WIDTH = "{w}" HEIGHT = "{h}" CONF = "{conf:0.3f}" PRED_CHAR_CNT="{pred_char_cnt:0.3f}"></LINE>\n'
                         else:
                             x, y = int(line[0]), int(line[1])
                             w, h = int(line[2] - line[0]), int(line[3] - line[1])

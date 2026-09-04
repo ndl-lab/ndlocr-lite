@@ -49,7 +49,7 @@ class PARSEQ:
 
     def preprocess(self, img: np.ndarray) -> np.ndarray:
         h,w=img.shape[:2]
-        if h>w:
+        if h>w*0.8:
             img=cv2.rotate(img,cv2.ROTATE_90_COUNTERCLOCKWISE)
         resized=cv2.resize(img,(self.input_width, self.input_height),interpolation=cv2.INTER_LINEAR)
         input_image=np.ascontiguousarray(resized[:,:,::-1]).astype(np.float32)
@@ -64,6 +64,7 @@ class PARSEQ:
         input_tensor = self.preprocess(img)
         outputs = self.session.run(self.output_names, {self.input_names[0]: input_tensor})[0]
         indices = np.argmax(outputs[0], axis=1)
+        #print(indices.size,indices)
         stop_idx = np.where(indices == 0)[0]
         end_pos = stop_idx[0] if stop_idx.size > 0 else len(indices)
         resval = indices[:end_pos].tolist()
