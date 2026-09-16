@@ -36,8 +36,10 @@ class DEIM:
         #opt_session.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
         providers = ['CPUExecutionProvider']
         if self.device.casefold() == "cuda":
-            providers = ['CUDAExecutionProvider','CPUExecutionProvider']
+            providers = [('CUDAExecutionProvider', {'device_id': 0}), 'CPUExecutionProvider']
         session = onnxruntime.InferenceSession(self.model_path,opt_session, providers=providers)
+        if self.device.casefold() == "cuda" and 'CUDAExecutionProvider' not in session.get_providers():
+            print('警告: CUDAExecutionProvider が利用できないため CPUExecutionProvider にフォールバックしました。onnxruntime-gpu と CUDA 環境を確認してください。')
         self.session = session
         self.model_inputs = self.session.get_inputs()
         self.input_names = [self.model_inputs[i].name for i in range(len(self.model_inputs))]
