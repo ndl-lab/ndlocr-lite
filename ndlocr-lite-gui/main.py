@@ -10,8 +10,31 @@ ImageFile.MAXBLOCK = 1024 * 1024 * 128
 from pathlib import Path
 
 sys.path.append(os.path.join('.', 'src'))
-import ocr
-from tools.ndlkoten2tei import convert_tei
+
+name = 'NDLOCR-Lite-GUI'
+
+try:
+    import ocr
+    from tools.ndlkoten2tei import convert_tei
+except (ImportError, OSError) as import_err:
+    # onnxruntime の DLL ロード失敗などで OCR エンジンを読み込めない場合に、
+    # 無言で終了（白画面・一瞬だけ枠が表示される等）せず原因と対処を案内する
+    _IMPORT_ERROR_MESSAGE = (
+        'OCRエンジンの読み込みに失敗しました。\n'
+        'Microsoft Visual C++ 再頒布可能パッケージがインストールされていない可能性があります。\n'
+        '以下からインストールしてから再度お試しください。\n'
+        'https://aka.ms/vs/17/release/vc_redist.x64.exe\n\n'
+        'Failed to load the OCR engine.\n'
+        'The Microsoft Visual C++ Redistributable may not be installed.\n'
+        'Please install it from the URL above and try again.\n\n'
+        '詳細 / Details: {}'
+    ).format(import_err)
+    if sys.platform == 'win32':
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, _IMPORT_ERROR_MESSAGE, name, 0x10)
+    else:
+        print(_IMPORT_ERROR_MESSAGE, file=sys.stderr)
+    sys.exit(1)
 import xml.etree.ElementTree as ET
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -33,8 +56,6 @@ from reading_order.xy_cut.eval import eval_xml
 from ndl_parser import convert_to_xml_string3
 from ndl_parser import categories_org_name_index
 
-
-name = 'NDLOCR-Lite-GUI'
 
 PDFTMPPATH = '4ab7ecc3-53fb-b3e7-64e8-a809b5a483d2'
 
