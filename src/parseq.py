@@ -30,8 +30,10 @@ class PARSEQ:
             opt_session.intra_op_num_threads = 1
             opt_session.inter_op_num_threads = 1
         elif self.device.casefold() == "cuda":
-            providers = ['CUDAExecutionProvider','CPUExecutionProvider']
+            providers = [('CUDAExecutionProvider', {'device_id': 0}), 'CPUExecutionProvider']
         session = onnxruntime.InferenceSession(self.model_path,opt_session, providers=providers)
+        if self.device.casefold() == "cuda" and 'CUDAExecutionProvider' not in session.get_providers():
+            print('警告: CUDAExecutionProvider が利用できないため CPUExecutionProvider にフォールバックしました。onnxruntime-gpu と CUDA 環境を確認してください。')
         self.session = session
         self.model_inputs = self.session.get_inputs()
         self.input_names = [self.model_inputs[i].name for i in range(len(self.model_inputs))]
