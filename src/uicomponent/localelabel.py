@@ -55,6 +55,18 @@ TRANSLATIONS = {
         "ja":"出力先を選択する",
         "en":"Select Output Directory",
     },
+    "main_stop_ocr_btn":{
+        "ja":"OCRを中断",
+        "en":"Stop OCR",
+    },
+    "main_ocr_cancel_requested":{
+        "ja":"中断を要求しました。現在の処理が終わり次第停止します……",
+        "en":"Stop requested. OCR will stop after the current operation……",
+    },
+    "main_ocr_cancelled":{
+        "ja":"OCRを中断しました（{completed}/{total}画像完了 / 所要時間 {elapsed:.2f}秒）",
+        "en":"OCR stopped ({completed}/{total} images completed / Total time {elapsed:.2f} sec)",
+    },
     "main_prev_btn":{
         "ja":"前の画像",
         "en":"Prev Image"
