@@ -13,6 +13,10 @@ Windows(Windows 11)、Mac(Apple M4, macOS Sequoia)及びLinux(Ubuntu 22.04)環�
 
 本プログラムは、国立国会図書館がCC BY 4.0ライセンスで公開するものです。詳細については[LICENCE](./LICENCE)をご覧ください。なお、本アプリケーションの実行時に利用するライブラリ等のライセンスについては[LICENCE_DEPENDENCIES](./LICENCE_DEPENDENCEIES)をご覧ください。
 
+なお、レイアウト認識モデルのバックボーンにDINOv3を蒸留したViT-Tinyモデルを利用しています。同梱の当館による学習済モデルを使用する場合には、次のDINOv3ライセンスについても遵守をお願いいたします。
+https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md
+
+
 ## デスクトップアプリケーションによる利用
 
 **デスクトップアプリケーションを利用する際には、日本語（全角文字）を含まないパスにアプリケーションを配置してください。全角文字を含む場合に起動しないことがあります。**
