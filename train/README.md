@@ -18,6 +18,7 @@ python3 -m venv deimenv
 source ./deimenv/bin/activate
 git clone https://github.com/Intellindust-AI-Lab/DEIMv2
 cd DEIMv2
+git reset --hard 726dee043b1f62f5c31ca8de5d2d9f2f6ccf38a4
 python3 -m pip install --upgrade pip
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 pip install faster-coco-eval>=1.6.7 PyYAML tensorboard scipy calflops transformers
