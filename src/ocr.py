@@ -1408,7 +1408,8 @@ def main():
         for k, v in vars(tcy_args).items():
             if v is not None:
                 setattr(args, k, v)
-    args = parser.parse_args()
+    elif remaining:
+        parser.error("unrecognized arguments: " + " ".join(remaining))
     process(args)
 
 if __name__=="__main__":
