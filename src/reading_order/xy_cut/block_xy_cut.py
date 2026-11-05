@@ -305,7 +305,7 @@ def sort_nodes(node, bboxes):
         node.num_vertical_lines = (w < h).sum()
         if 1 < node.num_lines:
             x0, y0, _, _ = bboxes[node.line_idx, :].T
-            perm = np.lexsort((y0, -x0) if node.is_vertical else (x0, y0))
+            perm = np.lexsort((y0, -x0) if node.is_vertical() else (x0, y0))
             node.line_idx[:] = [node.line_idx[i] for i in perm]
     else:
         for child in node.children:
