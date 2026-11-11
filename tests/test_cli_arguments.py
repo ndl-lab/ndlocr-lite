@@ -66,6 +66,57 @@ class CliArgumentsTest(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
                 process.assert_not_called()
 
+    def test_source_cli_does_not_resolve_downloads(self):
+        with patch("model_download.resolve_model_paths") as resolve:
+            args = self.parse_cli()
+        resolve.assert_not_called()
+        self.assertTrue(args.det_weights.endswith("deim-s-1024x1024.onnx"))
+
+    def test_packaged_cli_resolves_default_models(self):
+        argv = ["ndlocr-lite", "--sourceimg", "sample.png", "--output", "output",
+                "--det-weights", "custom.onnx"]
+        with patch.object(sys, "argv", argv), patch.object(ocr, "process") as process, patch(
+            "model_download.resolve_model_paths"
+        ) as resolve:
+            ocr.main(download_models=True)
+        args = process.call_args.args[0]
+        resolve.assert_called_once_with(args, Path(ocr.__file__).resolve().parent / "model")
+        self.assertEqual(args.det_weights, "custom.onnx")
+        self.assertIsNone(args.rec_weights)
+
+    def test_console_entry_point_enables_downloads(self):
+        import cli
+        with patch.object(ocr, "main") as main:
+            cli.main()
+        main.assert_called_once_with(download_models=True)
+
+    def test_help_and_version_do_not_download(self):
+        for option in ("--help", "--version"):
+            with self.subTest(option=option), patch.object(sys, "argv", ["ndlocr-lite", option]), patch(
+                "model_download.resolve_model_paths"
+            ) as resolve, contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    ocr.main(download_models=True)
+                self.assertEqual(error.exception.code, 0)
+                resolve.assert_not_called()
+
+    def test_packaged_help_mentions_gui_command(self):
+        with patch.object(sys, "argv", ["ndlocr-lite", "--help"]), contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit):
+                ocr.main(download_models=True)
+        self.assertIn("ndlocr-lite gui", output.getvalue())
+
+    def test_download_error_does_not_start_processing(self):
+        argv = ["ndlocr-lite", "--sourceimg", "sample.png", "--output", "output"]
+        with patch.object(sys, "argv", argv), patch.object(ocr, "process") as process, patch(
+            "model_download.resolve_model_paths", side_effect=RuntimeError("download failed")
+        ), contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as error:
+                ocr.main(download_models=True)
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("download failed", stderr.getvalue())
+        process.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

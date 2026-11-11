@@ -1,0 +1,82 @@
+name: Publish CLI to PyPI
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install build tools
+        run: python -m pip install --upgrade build twine
+      - name: Set CLI development version from the GUI release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python src/set_version.py "$RELEASE_TAG" --dev
+      - name: Build distributions
+        run: python -m build
+      - name: Check distribution metadata
+        run: python -m twine check --strict dist/*
+      - name: Check distribution sizes and model exclusion
+        shell: python
+        run: |
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          for path in Path("dist").iterdir():
+              if path.stat().st_size >= 100_000_000:
+                  raise SystemExit(f"Distribution is too large: {path}")
+              if path.suffix == ".whl":
+                  with zipfile.ZipFile(path) as archive:
+                      names = archive.namelist()
+                  required = {
+                      "ndlocr_lite_gui/__init__.py",
+                      "ndlocr_lite_gui/main.py",
+                      "ndlocr_lite_gui/gui_config.py",
+                      "ndlocr_lite_gui/assets/icon.png",
+                      "uicomponent/localelabel.py",
+                      "uicomponent/textdaisy.py",
+                      "tools/ndlkoten2tei.py",
+                  }
+                  if not required.issubset(names):
+                      raise SystemExit(f"Distribution lacks GUI resources: {required - set(names)}")
+              else:
+                  with tarfile.open(path) as archive:
+                      names = archive.getnames()
+              if any(name.lower().endswith(".onnx") for name in names):
+                  raise SystemExit(f"Distribution contains ONNX models: {path}")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-distributions
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/ndlocr-lite/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-distributions
+          path: dist
+      - name: Publish development release to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

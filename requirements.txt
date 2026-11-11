@@ -1,4 +1,4 @@
-flet==0.86.5
+flet[desktop]==1.1.2
 dill==0.3.8
 lxml==6.1.3
 networkx==3.3
@@ -14,5 +14,5 @@ numpy==2.2.2
 opencv-python-headless==4.11.0.86
 onnxruntime==1.31.1; python_version >= "3.11" and sys_platform != "darwin"
 onnxruntime==1.23.2; python_version == "3.10" or sys_platform == "darwin"
-pypdf==6.21.2
+pypdf==6.21.4
 cryptography==50.0.2

@@ -1,0 +1,15 @@
+json: true
+langcode: ja
+markdown: false
+pdf: false
+pdf_merge: true
+pdf_page_output: true
+pdf_resolution: 300
+pdf_viztxt: false
+result_markdown_display: false
+selected_output_path: F:\testout
+tei: true
+text_daisy: false
+txt: true
+visualize: true
+xml: true

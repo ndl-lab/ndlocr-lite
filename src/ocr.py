@@ -1371,11 +1371,14 @@ def process(args):
                 wtf.write("\n".join(alltextlist))
         print("Total calculation time (Detection + Recognition):",time.time()-start)
 
-def main():
+def main(*, download_models=False):
     import argparse
     from pathlib import Path
     base_dir = Path(__file__).resolve().parent
-    parser = argparse.ArgumentParser(description="Arguments for NDLkotenOCR-Lite")
+    parser = argparse.ArgumentParser(
+        description="Arguments for NDLkotenOCR-Lite",
+        epilog="Run 'ndlocr-lite gui' to launch the desktop GUI." if download_models else None,
+    )
 
     parser.add_argument("--sourcedir", type=str, required=False, help="Path to image directory")
     parser.add_argument("--sourceimg", type=str, required=False, help="Path to image directory")
@@ -1386,15 +1389,15 @@ def main():
     parser.add_argument("--pdf-render-dpi", "--pdf-dpi", dest="pdf_render_dpi", type=float, required=False, default=150.0, help="DPI used to render PDF pages for OCR")
     parser.add_argument("--pdf-page-output", action=argparse.BooleanOptionalAction, default=True, help="When a multi-page PDF is input, output TXT/JSON/XML per page")
     parser.add_argument("--pdf-visible-text", action="store_true", help="Draw PDF text layer visibly in blue for debugging")
-    parser.add_argument("--det-weights", type=str, required=False, help="Path to deim onnx file", default=str(base_dir / "model" / "deim-s-1024x1024.onnx"))
+    parser.add_argument("--det-weights", type=str, required=False, help="Path to deim onnx file", default=None if download_models else str(base_dir / "model" / "deim-s-1024x1024.onnx"))
     parser.add_argument("--det-classes", type=str, required=False, help="Path to list of class in yaml file", default=str(base_dir / "config" / "ndl.yaml"))
     parser.add_argument("--det-score-threshold", type=float, required=False, default=0.2)
     parser.add_argument("--det-conf-threshold", type=float, required=False, default=0.25)
     parser.add_argument("--det-iou-threshold", type=float, required=False, default=0.2)
     parser.add_argument("--simple-mode", type=bool, required=False, help="Read line with one model(Setting this option to True will slow down processing, but it simplifies the architecture and may slightly improve accuracy.)",default=False)
-    parser.add_argument("--rec-weights30", type=str, required=False, help="Path to parseq-tiny onnx file", default=str(base_dir / "model" / "parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx"))
-    parser.add_argument("--rec-weights50", type=str, required=False, help="Path to parseq-tiny onnx file", default=str(base_dir / "model" / "parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx"))
-    parser.add_argument("--rec-weights", type=str, required=False, help="Path to parseq-tiny onnx file", default=str(base_dir / "model" / "parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx"))
+    parser.add_argument("--rec-weights30", type=str, required=False, help="Path to parseq-tiny onnx file", default=None if download_models else str(base_dir / "model" / "parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx"))
+    parser.add_argument("--rec-weights50", type=str, required=False, help="Path to parseq-tiny onnx file", default=None if download_models else str(base_dir / "model" / "parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx"))
+    parser.add_argument("--rec-weights", type=str, required=False, help="Path to parseq-tiny onnx file", default=None if download_models else str(base_dir / "model" / "parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx"))
     parser.add_argument("--rec-classes", type=str, required=False, help="Path to list of class in yaml file", default=str(base_dir / "config" / "NDLmoji.yaml"))
     parser.add_argument("--device", type=str, required=False, help="Device use (cpu or cuda)", choices=["cpu", "cuda"], default="cpu")
     parser.add_argument("--enable-tcy", action="store_true", dest="enable_tcy", default=False, help="Enable tate-chuu-yoko (縦中横) detection for vertical text (e.g. newspaper OCR)")
@@ -1410,6 +1413,12 @@ def main():
                 setattr(args, k, v)
     elif remaining:
         parser.error("unrecognized arguments: " + " ".join(remaining))
+    if download_models:
+        from model_download import resolve_model_paths
+        try:
+            resolve_model_paths(args, base_dir / "model")
+        except RuntimeError as error:
+            parser.error(str(error))
     process(args)
 
 if __name__=="__main__":
