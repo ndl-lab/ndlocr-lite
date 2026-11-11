@@ -12,7 +12,7 @@ dynamic = ["dependencies"]
 
 [project.optional-dependencies]
 dev = [
-    "flet[all,test]==0.86.5",
+    "flet[all,test]==1.1.2",
 ]
 
 [tool.setuptools.dynamic]
@@ -37,22 +37,20 @@ copyright = "Copyright (C) 2025 by National Diet Library"
 path = "."
 exclude = [".flet", ".venv", "__pycache__", "tests", ".git"]
 
-# OpenCV imports cv2/config.py dynamically by filename. Flet 0.86 compiles and
-# removes package sources by default, which makes cv2 fail at startup.
 [tool.flet.compile]
 app = true
 packages = false
 
 [tool.uv]
 dev-dependencies = [
-    "flet[all,test]==0.86.5",
+    "flet[all,test]==1.1.2",
 ]
 
 [tool.poetry]
 package-mode = false
 
 [tool.poetry.group.dev.dependencies]
-flet = {extras = ["all", "test"], version = "0.86.5"}
+flet = {extras = ["all", "test"], version = "1.1.2"}
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

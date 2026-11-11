@@ -10,7 +10,9 @@ import threading
 
 APP_DIR = Path(__file__).resolve().parent
 SOURCE_DIR = APP_DIR / 'src'
-if not SOURCE_DIR.is_dir():
+if __package__ == 'ndlocr_lite_gui':
+    SOURCE_DIR = APP_DIR.parent
+elif not SOURCE_DIR.is_dir():
     # Source checkout: CI/builds copy src beside main.py, while local development
     # uses the repository's top-level src directory directly.
     SOURCE_DIR = APP_DIR.parent / 'src'
@@ -27,7 +29,10 @@ import io
 import glob
 import ctypes
 from io import BytesIO
-from gui_config import build_default_config
+if __package__ == 'ndlocr_lite_gui':
+    from .gui_config import build_default_config
+else:
+    from gui_config import build_default_config
 from uicomponent.localelabel import TRANSLATIONS
 from uicomponent.textdaisy import TextDaisyExporter
 from collections import Counter
@@ -201,8 +206,11 @@ def process_cascade(alllineobj: RecogLine, recognizer30, recognizer50, recognize
     return [t.pred_str for t in targetdflistall]
 
 
-def load_ocr_models(args):
+def load_ocr_models(args, *, download_models=False):
     """Create the four independent ONNX sessions concurrently."""
+    if download_models:
+        from model_download import resolve_model_paths
+        resolve_model_paths(args, SOURCE_DIR / 'model')
     load_runtime_modules()
     if hasattr(ocr, '_load_charlist'):
         ocr._load_charlist(os.path.abspath(args.rec_classes))
@@ -888,24 +896,30 @@ class CaptureTool:
             self.page.pop_dialog()
         self.page.show_dialog(self.dialog)
 
-def main(page: ft.Page):
+def parse_gui_args(argv=None, *, download_models=False):
     parser = argparse.ArgumentParser(description='Argument for Inference using ONNXRuntime')
-    parser.add_argument('--det-weights', type=str, required=False, help='Path to rtmdet onnx file', default=str(SOURCE_DIR / 'model' / 'deim-s-1024x1024.onnx'))
+    parser.add_argument('--det-weights', type=str, required=False, help='Path to rtmdet onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'deim-s-1024x1024.onnx'))
     parser.add_argument('--det-classes', type=str, required=False, help='Path to list of class in yaml file', default=str(SOURCE_DIR / 'config' / 'ndl.yaml'))
     parser.add_argument('--det-score-threshold', type=float, required=False, default=0.2)
     parser.add_argument('--det-conf-threshold', type=float, required=False, default=0.25)
     parser.add_argument('--det-iou-threshold', type=float, required=False, default=0.2)
-    parser.add_argument('--rec-weights30', type=str, required=False, help='Path to parseq-tiny onnx file', default=str(SOURCE_DIR / 'model' / 'parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx'))
-    parser.add_argument('--rec-weights50', type=str, required=False, help='Path to parseq-tiny onnx file', default=str(SOURCE_DIR / 'model' / 'parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx'))
-    parser.add_argument('--rec-weights', type=str, required=False, help='Path to parseq-tiny onnx file', default=str(SOURCE_DIR / 'model' / 'parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx'))
+    parser.add_argument('--rec-weights30', type=str, required=False, help='Path to parseq-tiny onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx'))
+    parser.add_argument('--rec-weights50', type=str, required=False, help='Path to parseq-tiny onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx'))
+    parser.add_argument('--rec-weights', type=str, required=False, help='Path to parseq-tiny onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx'))
     parser.add_argument('--rec-classes', type=str, required=False, help='Path to list of class in yaml file', default=str(SOURCE_DIR / 'config' / 'NDLmoji.yaml'))
     parser.add_argument('--device', type=str, required=False, help='Device use (cpu or cuda)', choices=['cpu', 'cuda'], default='cpu')
     if TABLE_STRUCTURE_FEATURE is not None:
         TABLE_STRUCTURE_FEATURE.add_arguments(parser, SOURCE_DIR)
-    # Flet and test runners may append their own process arguments. Keep the
-    # GUI's OCR options while leaving unrelated host arguments untouched.
-    args, _ = parser.parse_known_args()
+    if download_models:
+        return parser.parse_args(argv)
+    # Flet may append its own process arguments to the desktop entry point.
+    args, _ = parser.parse_known_args(argv)
+    return args
 
+
+def main(page: ft.Page, *, args=None, download_models=False):
+    if args is None:
+        args = parse_gui_args()
     page.title = 'NDLOCR-Lite-GUI v{}'.format(__version__)
     page.theme_mode = ft.ThemeMode.SYSTEM
     page.window.icon = str(ASSETS_DIR / 'icon.png')
@@ -2009,7 +2023,7 @@ def main(page: ft.Page):
                     origin_recognizer,
                     origin_recognizer30,
                     origin_recognizer50,
-                ) = await asyncio.to_thread(load_ocr_models, args)
+                ) = await asyncio.to_thread(load_ocr_models, args, download_models=download_models)
                 origin_table_recognizer = None
                 model_state['table_error'] = None
                 if TABLE_STRUCTURE_FEATURE is not None:

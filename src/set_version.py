@@ -8,6 +8,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("version")
     parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Use the GUI release version with a .dev0 suffix for the CLI.",
+    )
+    parser.add_argument(
         "--version-file",
         default="src/version.py",
     )
@@ -21,6 +26,13 @@ def main() -> None:
         version,
     ):
         raise SystemExit(f"Invalid release version: {version}")
+
+    if args.dev:
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+            raise SystemExit(
+                "--dev requires a GUI release version in X.Y.Z format"
+            )
+        version = f"{version}.dev0"
 
     pyproject_path = pathlib.Path("pyproject.toml")
 

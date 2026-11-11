@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ndlocr-lite"
-version = "1.3.0"
+version = "1.4.0"
 description = "NDLOCR-Lite CLI Application"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,15 +14,18 @@ dynamic = ["dependencies"]
 dependencies = { file = ["requirements.txt"] }
 
 [project.scripts]
-ndlocr-lite = "ocr:main"
+ndlocr-lite = "cli:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-py-modules = ["ocr", "deim", "parseq", "ndl_parser", "tcy_wrapper","pdf_output_utils","version"]
+py-modules = ["cli", "model_download", "ocr", "deim", "parseq", "ndl_parser", "tcy_wrapper","pdf_output_utils","version"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools.package-dir]
+"" = "src"
+ndlocr_lite_gui = "ndlocr-lite-gui"
 
 [tool.setuptools.package-data]
-"model" = ["*.onnx"]
 "config" = ["*.yaml"]
+"ndlocr_lite_gui" = ["assets/*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*.onnx"]
