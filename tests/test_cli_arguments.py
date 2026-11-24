@@ -1,5 +1,6 @@
 import contextlib
 import io
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 import sys
 import unittest
@@ -105,6 +106,32 @@ class CliArgumentsTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 ocr.main(download_models=True)
         self.assertIn("ndlocr-lite gui", output.getvalue())
+
+    def test_packaged_version_uses_distribution_metadata(self):
+        with patch.object(sys, "argv", ["ndlocr-lite", "--version"]), patch(
+            "importlib.metadata.version", return_value="2.1.0.dev3"
+        ) as version, patch("model_download.resolve_model_paths") as resolve, patch.object(
+            ocr, "process"
+        ) as process, contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit) as error:
+                ocr.main(download_models=True)
+        self.assertEqual(error.exception.code, 0)
+        self.assertEqual(output.getvalue(), "ndlocr-lite 2.1.0.dev3\n")
+        version.assert_called_once_with("ndlocr-lite")
+        resolve.assert_not_called()
+        process.assert_not_called()
+
+    def test_version_without_distribution_uses_source_version(self):
+        for download_models in (False, True):
+            with self.subTest(download_models=download_models), patch.object(
+                sys, "argv", ["ndlocr-lite", "--version"]
+            ), patch(
+                "importlib.metadata.version", side_effect=PackageNotFoundError("ndlocr-lite")
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                with self.assertRaises(SystemExit) as error:
+                    ocr.main(download_models=download_models)
+            self.assertEqual(error.exception.code, 0)
+            self.assertEqual(output.getvalue(), f"ndlocr-lite {ocr.__version__}\n")
 
     def test_download_error_does_not_start_processing(self):
         argv = ["ndlocr-lite", "--sourceimg", "sample.png", "--output", "output"]

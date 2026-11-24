@@ -1448,8 +1448,11 @@ def process(args):
     if len(inputpathlist)==0:
         print("Images are not found.")
         return
-    if not os.path.exists(args.output):
-        print("Output Directory is not found.")
+    try:
+        os.makedirs(args.output, exist_ok=True)
+    except OSError as exc:
+        print(f"Failed to create output directory: {args.output}")
+        print(f"Error: {exc}")
         return
     
     detector=get_detector(args)
@@ -1590,7 +1593,14 @@ def process(args):
 
 def main(download_models=False):
     import argparse
+    from importlib.metadata import PackageNotFoundError, version
     from pathlib import Path
+    application_version = __version__
+    if download_models:
+        try:
+            application_version = version("ndlocr-lite")
+        except PackageNotFoundError:
+            pass
     base_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description="Arguments for NDLkotenOCR-Lite")
     if download_models:
@@ -1620,7 +1630,7 @@ def main(download_models=False):
     parser.add_argument("--device", type=str, required=False, help="Device use (cpu or cuda)", choices=["cpu", "cuda"], default="cpu")
     parser.add_argument("--enable-tcy", action="store_true", dest="enable_tcy", default=False, help="Enable tate-chuu-yoko (縦中横) detection for vertical text (e.g. newspaper OCR)")
     parser.add_argument("--json-only", action="store_true", help="Disable .xml and .txt output and only output JSON")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {application_version}")
     if download_models:
         from model_download import MODELS, resolve_model_paths
 
