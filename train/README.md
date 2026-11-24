@@ -143,6 +143,17 @@ python3 convert2onnx.py
 
 NDLOCR-Liteで利用する場合は、--rec-weightsオプションでonnxファイルのパスを指定してください。
 
+
+## 表構造認識(TableCenterNet)
+
+Anyi Xiao and Cihui Yang. TableCenterNet: A one-stage network for table structure recognition. arXiv:2504.17522, 2025. (https://arxiv.org/abs/2504.17522)
+
+を利用して表構造認識モデルを作成します。
+
+（準備中）
+
+
+
 ## pytorchチェックポイントファイルの提供（ファインチューニング用途を想定）
 ### ■NDLOCR-Lite ver1.0/ver1.1
 #### DEIMv2
@@ -176,4 +187,20 @@ https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1.2_models/parseq-ndl-24x384-50-tin
 https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1.2_models/parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.ckpt
 
 
+### ■NDLOCR-Lite ver2.0
 
+* 上記「学習(2)」に対応
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver2.0_models/deimv2-phase2-checkpoint0054.pth
+
+#### PARSeq
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver2.0_models/parseq-ndl-24x256-30-tiny-499epoch-261124.ckpt
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver2.0_models/parseq-ndl-24x384-50-tiny-278epoch-261124.ckpt
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver2.0_models/parseq-ndl-24x768-100-tiny-153epoch-20261104.ckpt
+
+#### TableCenterNet
+
+https://lab.ndl.go.jp/dataset/ndlocr-lite/ver2.0_models/tablecenternet_model_200epoch.pth
