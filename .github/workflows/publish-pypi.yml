@@ -25,7 +25,7 @@ jobs:
       - name: Set CLI development version from the GUI release tag
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: python src/set_version.py "$RELEASE_TAG" --dev
+        run: python src/set_version.py "$RELEASE_TAG"
       - name: Build distributions
         run: python -m build
       - name: Check distribution metadata
