@@ -10,7 +10,7 @@ def main() -> None:
     parser.add_argument(
         "--dev",
         action="store_true",
-        help="Use the GUI release version with a .dev0 suffix for the CLI.",
+        help="Use the GUI release version with a .dev1 suffix for the CLI.",
     )
     parser.add_argument(
         "--version-file",
@@ -32,7 +32,7 @@ def main() -> None:
             raise SystemExit(
                 "--dev requires a GUI release version in X.Y.Z format"
             )
-        version = f"{version}.dev0"
+        version = f"{version}.dev1"
 
     pyproject_path = pathlib.Path("pyproject.toml")
 
