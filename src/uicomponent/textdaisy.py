@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import math
 from pathlib import Path
+from statistics import median
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import quote
 from uuid import uuid4
 import re
 import shutil
+import unicodedata
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
+
+from PIL import Image
 
 
 @dataclass(frozen=True)
@@ -25,12 +30,12 @@ class TextDaisyExporter:
     """NDLOCR-Lite の OCR 結果から DAISY 3 textNCX ファイルセットを生成する。
 
     変換方針:
-    - NDLOCR-Lite XML の <TEXTBLOCK> 1 件を DTBook の <p> 1 件へ対応させる。
+    - 本文行の字下げを TEXTBLOCK と LINE の座標差から検出し、段落ごとの <p> に分割する。
     - <LINE TYPE="タイトル本文"> が出た位置で新しいセクションを開始する。
     - セクションごとに ptk00001.xml / ptk00001.smil、ptk00002.xml / ptk00002.smil ... を出力する。
     - 各セクション内の <sent id="t0000001"> と <par id="phr00001"> は、そのファイルごとに 1 から採番する。
-    - 各 OCR 行は <sent> として出力し、対応する SMIL の <par id="phrxxxxx"> と相互参照する。
-    - NDLOCR-Lite XML の <BLOCK TYPE="図版"> は DTBook の <imggroup>/<img> と、同期用説明 <p><sent> として出力する。
+    - 段落内の OCR 行を結合して句読点ごとの <sent> とし、対応する SMIL の <par id="phrxxxxx"> と相互参照する。
+    - NDLOCR-Lite XML の <BLOCK TYPE="図版"> は元画像から切り出し、JPEG と DTBook の <imggroup>/<img> として出力する。
 
     pages は main.py の alljsonobjlist と同じ形式を基本としつつ、XML 構造を使う場合は
     各 page dict に次のいずれかのキーで NDLOCR-Lite XML 文字列または XML パスを渡す。
@@ -48,7 +53,15 @@ class TextDaisyExporter:
 
     TITLE_LINE_TYPE = "タイトル本文"
     FIGURE_BLOCK_TYPE = "図版"
-    FIGURE_PLACEHOLDER_FILE = "images/figure_placeholder.svg"
+    TABLE_BLOCK_TYPE = "表組"
+    FIGURE_IMAGE_DIR = "image"
+    FIGURE_DPI = 300
+    FIGURE_MAX_WIDTH_PX = 550
+    FIGURE_MAX_HEIGHT_PX = 400
+    FIGURE_JPEG_QUALITY = 95
+    PHRASE_DELIMITERS = frozenset("、。，．")
+    PUNCTUATION_CLOSERS = frozenset("」』)）］】〉》〕〗〙〛”’")
+    INDENT_THRESHOLD_EM = 0.5
 
     def __init__(
         self,
@@ -83,7 +96,7 @@ class TextDaisyExporter:
 
         normalized_pages = self._normalize_pages(pages)
         sections = self._build_sections(normalized_pages)
-        self._ensure_sections_start_with_heading(sections)
+        self._ensure_sections_have_single_heading(sections)
         self._ensure_sections_have_body(sections)
         phrases = self._assign_phrase_ids(sections, normalized_pages)
         safe_folder = self._safe_filename(folder_name or f"{self.title}_textdaisy")
@@ -93,6 +106,7 @@ class TextDaisyExporter:
             shutil.rmtree(book_dir)
 
         book_dir.mkdir(parents=True, exist_ok=True)
+        self._write_figure_images(sections, normalized_pages, book_dir)
 
         for section in sections:
             (book_dir / section["dtbook_file"]).write_text(
@@ -101,11 +115,6 @@ class TextDaisyExporter:
             (book_dir / section["smil_file"]).write_text(
                 self._build_smil(section), encoding="utf-8"
             )
-
-        if self._sections_have_figures(sections):
-            figure_path = book_dir / self.FIGURE_PLACEHOLDER_FILE
-            figure_path.parent.mkdir(parents=True, exist_ok=True)
-            figure_path.write_text(self._build_figure_placeholder_svg(), encoding="utf-8")
 
         (book_dir / self.NCX_FILE).write_text(
             self._build_ncx(normalized_pages, sections, phrases), encoding="utf-8"
@@ -139,6 +148,13 @@ class TextDaisyExporter:
             if xml_source:
                 xml_pages = self._extract_pages_from_ndl_xml(xml_source)
                 if xml_pages:
+                    source_info = self._source_image_info(page)
+                    for source_offset, xml_page in enumerate(xml_pages):
+                        xml_page.update(source_info)
+                        if source_info.get("source_page_index") is not None:
+                            xml_page["source_page_index"] = (
+                                int(source_info["source_page_index"]) + source_offset
+                            )
                     normalized.extend(xml_pages)
                     continue
 
@@ -171,7 +187,24 @@ class TextDaisyExporter:
         return {
             "page_no": page_index,
             "label": label,
+            **self._source_image_info(page),
             "blocks": blocks,
+        }
+
+    def _source_image_info(self, page: Dict[str, Any]) -> Dict[str, Any]:
+        imginfo = page.get("imginfo", {}) or {}
+        image_path = (
+            imginfo.get("img_path")
+            or imginfo.get("image_path")
+            or page.get("img_path")
+            or page.get("image_path")
+        )
+        source_page_index = imginfo.get("source_page_index")
+        source_dpi = imginfo.get("source_dpi")
+        return {
+            "image_path": str(image_path) if image_path else None,
+            "source_page_index": source_page_index,
+            "source_dpi": source_dpi,
         }
 
     def _extract_json_line_objects(self, page: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -197,6 +230,8 @@ class TextDaisyExporter:
                     "text": text,
                     "line_type": self._get_json_line_type(obj),
                     "block_key": self._get_json_block_key(obj),
+                    "bbox": self._bbox_from_json_line(obj),
+                    "is_vertical": self._json_line_is_vertical(obj),
                 }
             )
 
@@ -237,7 +272,12 @@ class TextDaisyExporter:
         def flush() -> None:
             nonlocal current_lines
             if current_lines:
-                blocks.extend(self._split_lines_to_dtbook_blocks(current_lines))
+                blocks.extend(
+                    self._split_lines_to_dtbook_blocks(
+                        current_lines,
+                        self._bbox_from_lines(current_lines),
+                    )
+                )
                 current_lines = []
 
         for line in line_objects:
@@ -325,6 +365,9 @@ class TextDaisyExporter:
         pending_lines: List[Dict[str, Any]] = []
         block_type = str(block_elem.attrib.get("TYPE", "")).strip()
 
+        if self._is_table_block_type(block_type):
+            return self._blocks_from_table_elem(block_elem)
+
         def flush_pending_lines() -> None:
             nonlocal pending_lines
             if pending_lines:
@@ -332,8 +375,6 @@ class TextDaisyExporter:
                 pending_lines = []
 
         if self._is_figure_block_type(block_type):
-            # 図版ブロック自体を DTBook の画像要素として残す。
-            # SMIL で同期できるよう、後続の説明 p/sent も同じ内部ブロックから生成する。
             blocks.append(self._make_figure_block(block_elem))
 
         for elem in list(block_elem):
@@ -350,6 +391,65 @@ class TextDaisyExporter:
         flush_pending_lines()
         return blocks
 
+    def _blocks_from_table_elem(self, table_elem: ET.Element) -> List[Dict[str, Any]]:
+        cells = []
+        for original_index, elem in enumerate(table_elem.iter()):
+            if self._local_name(elem.tag) != "LINE":
+                continue
+            line = self._line_from_xml(elem)
+            if line["text"]:
+                cells.append({**line, "original_index": original_index})
+
+        if not cells:
+            return []
+
+        rows = [cells]
+        if all(cell.get("bbox") is not None for cell in cells):
+            heights = [
+                cell["bbox"][3] - cell["bbox"][1]
+                for cell in cells
+            ]
+            row_tolerance = max(1.0, float(median(heights)) * 0.6)
+            rows = []
+            for cell in sorted(
+                cells,
+                key=lambda item: (
+                    (item["bbox"][1] + item["bbox"][3]) / 2,
+                    item["bbox"][0],
+                    item["original_index"],
+                ),
+            ):
+                center_y = (cell["bbox"][1] + cell["bbox"][3]) / 2
+                if not rows or abs(center_y - rows[-1]["center_y"]) > row_tolerance:
+                    rows.append({"center_y": center_y, "cells": [cell]})
+                    continue
+
+                row = rows[-1]
+                row["cells"].append(cell)
+                row["center_y"] = sum(
+                    (item["bbox"][1] + item["bbox"][3]) / 2
+                    for item in row["cells"]
+                ) / len(row["cells"])
+
+            rows = [
+                sorted(
+                    row["cells"],
+                    key=lambda item: (item["bbox"][0], item["original_index"]),
+                )
+                for row in rows
+            ]
+
+        return [
+            self._make_dtbook_block(
+                "p",
+                [{
+                    "text": " ".join(cell["text"] for cell in row),
+                    "line_type": "本文",
+                }],
+            )
+            for row in rows
+        ]
+
     def _blocks_from_textblock_elem(self, textblock_elem: ET.Element) -> List[Dict[str, Any]]:
         lines: List[Dict[str, Any]] = []
         for elem in list(textblock_elem):
@@ -359,7 +459,10 @@ class TextDaisyExporter:
             if line["text"]:
                 lines.append(line)
 
-        return self._split_lines_to_dtbook_blocks(lines)
+        return self._split_lines_to_dtbook_blocks(
+            lines,
+            self._element_bbox(textblock_elem),
+        )
 
     def _line_from_xml(self, line_elem: ET.Element) -> Dict[str, Any]:
         text = (line_elem.attrib.get("STRING") or line_elem.attrib.get("TEXT") or "").strip()
@@ -373,22 +476,37 @@ class TextDaisyExporter:
         return {
             "text": text,
             "line_type": line_elem.attrib.get("TYPE", "本文"),
+            "bbox": self._element_bbox(line_elem),
+            "is_vertical": self._xml_line_is_vertical(line_elem),
         }
 
-    def _split_lines_to_dtbook_blocks(self, lines: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _split_lines_to_dtbook_blocks(
+        self,
+        lines: Sequence[Dict[str, Any]],
+        textblock_bbox: Optional[Tuple[float, float, float, float]] = None,
+    ) -> List[Dict[str, Any]]:
         blocks: List[Dict[str, Any]] = []
         current_tag: Optional[str] = None
         current_lines: List[Dict[str, Any]] = []
+        current_text_indent = False
+        is_vertical = self._lines_are_vertical(lines)
 
         def tag_for_line(line: Dict[str, Any]) -> str:
             return "h1" if self._is_title_line(line) else "p"
 
         def flush() -> None:
-            nonlocal current_lines, current_tag
+            nonlocal current_lines, current_tag, current_text_indent
             if current_lines and current_tag:
-                blocks.append(self._make_dtbook_block(current_tag, current_lines))
+                blocks.append(
+                    self._make_dtbook_block(
+                        current_tag,
+                        current_lines,
+                        text_indent=current_text_indent,
+                    )
+                )
             current_tag = None
             current_lines = []
+            current_text_indent = False
 
         for line in lines:
             text = str(line.get("text", "")).strip()
@@ -396,14 +514,27 @@ class TextDaisyExporter:
                 continue
 
             tag = tag_for_line(line)
+            starts_indented_paragraph = (
+                tag == "p"
+                and self._is_body_line(line)
+                and self._line_starts_indented(line, textblock_bbox, is_vertical)
+            )
             if current_tag is None:
                 current_tag = tag
-            elif current_tag != tag:
+                current_text_indent = starts_indented_paragraph
+            elif current_tag != tag or starts_indented_paragraph:
                 # TEXTBLOCK の途中に「タイトル本文」がある場合も、そこで段落/見出しを切る。
                 flush()
                 current_tag = tag
+                current_text_indent = starts_indented_paragraph
 
-            current_lines.append({"text": text, "line_type": line.get("line_type", "本文")})
+            current_lines.append(
+                {
+                    "text": text,
+                    "line_type": line.get("line_type", "本文"),
+                    "generated": bool(line.get("generated")),
+                }
+            )
 
         flush()
         return blocks
@@ -414,13 +545,164 @@ class TextDaisyExporter:
         lines: Sequence[Dict[str, Any]],
         *,
         generated: bool = False,
+        text_indent: bool = False,
     ) -> Dict[str, Any]:
         return {
             "tag": tag,
             "is_heading": tag.startswith("h"),
             "generated": generated,
+            "text_indent": text_indent,
             "lines": [dict(line) for line in lines],
         }
+
+    def _line_starts_indented(
+        self,
+        line: Dict[str, Any],
+        textblock_bbox: Optional[Tuple[float, float, float, float]],
+        is_vertical: bool,
+    ) -> bool:
+        line_bbox = line.get("bbox")
+        if textblock_bbox is None or line_bbox is None:
+            return False
+
+        block_start = textblock_bbox[1] if is_vertical else textblock_bbox[0]
+        line_start = line_bbox[1] if is_vertical else line_bbox[0]
+        em_size = (
+            line_bbox[2] - line_bbox[0]
+            if is_vertical
+            else line_bbox[3] - line_bbox[1]
+        )
+        return em_size > 0 and line_start - block_start >= em_size * self.INDENT_THRESHOLD_EM
+
+    def _lines_are_vertical(self, lines: Sequence[Dict[str, Any]]) -> bool:
+        body_lines = [line for line in lines if self._is_body_line(line)]
+        direction_lines = body_lines or [
+            line for line in lines if not self._is_title_line(line)
+        ]
+        directions = [
+            bool(line["is_vertical"])
+            for line in direction_lines
+            if line.get("is_vertical") is not None
+        ]
+        if not directions:
+            return False
+        return sum(directions) * 2 > len(directions)
+
+    def _is_body_line(self, line: Dict[str, Any]) -> bool:
+        line_type = str(line.get("line_type", "")).strip().lower()
+        return line_type in {"本文", "line_main", "main", "body"}
+
+    def _xml_line_is_vertical(self, line_elem: ET.Element) -> Optional[bool]:
+        direction = str(line_elem.attrib.get("DIRECTION", "")).strip().lower()
+        if direction:
+            if direction in {"縦", "vertical", "v"}:
+                return True
+            if direction in {"横", "horizontal", "h"}:
+                return False
+
+        bbox = self._element_bbox(line_elem)
+        if bbox is None:
+            return None
+        return bbox[3] - bbox[1] > bbox[2] - bbox[0]
+
+    def _json_line_is_vertical(self, obj: Dict[str, Any]) -> Optional[bool]:
+        value = obj.get("isVertical")
+        if isinstance(value, bool):
+            return value
+        if value is not None:
+            normalized = str(value).strip().lower()
+            if normalized in {"true", "1", "縦", "vertical", "v"}:
+                return True
+            if normalized in {"false", "0", "横", "horizontal", "h"}:
+                return False
+
+        bbox = self._bbox_from_json_line(obj)
+        if bbox is None:
+            return None
+        return bbox[3] - bbox[1] > bbox[2] - bbox[0]
+
+    def _bbox_from_json_line(
+        self,
+        obj: Dict[str, Any],
+    ) -> Optional[Tuple[float, float, float, float]]:
+        points = obj.get("boundingBox") or obj.get("bounding_box")
+        if not isinstance(points, (list, tuple)):
+            return None
+
+        try:
+            xs = [float(point[0]) for point in points]
+            ys = [float(point[1]) for point in points]
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not xs or not ys:
+            return None
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def _element_bbox(
+        self,
+        elem: ET.Element,
+    ) -> Optional[Tuple[float, float, float, float]]:
+        try:
+            x = float(elem.attrib["X"])
+            y = float(elem.attrib["Y"])
+            width = float(elem.attrib["WIDTH"])
+            height = float(elem.attrib["HEIGHT"])
+            if width > 0 and height > 0:
+                return x, y, x + width, y + height
+        except (KeyError, TypeError, ValueError):
+            pass
+
+        polygon = next(
+            (
+                child
+                for child in elem.iter()
+                if self._local_name(child.tag) == "POLYGON"
+            ),
+            None,
+        )
+        if polygon is not None:
+            raw_points = str(polygon.attrib.get("POINTS", "")).strip()
+            try:
+                coordinates = [
+                    float(value)
+                    for value in re.split(r"[\s,]+", raw_points)
+                    if value
+                ]
+            except ValueError:
+                coordinates = []
+            points = list(zip(coordinates[0::2], coordinates[1::2]))
+            if points:
+                xs = [point[0] for point in points]
+                ys = [point[1] for point in points]
+                return min(xs), min(ys), max(xs), max(ys)
+
+        descendant_lines = [
+            self._element_bbox(child)
+            for child in elem.iter()
+            if child is not elem and self._local_name(child.tag) == "LINE"
+        ]
+        return self._merge_bboxes([bbox for bbox in descendant_lines if bbox is not None])
+
+    def _bbox_from_lines(
+        self,
+        lines: Sequence[Dict[str, Any]],
+    ) -> Optional[Tuple[float, float, float, float]]:
+        return self._merge_bboxes(
+            [line["bbox"] for line in lines if line.get("bbox") is not None]
+        )
+
+    def _merge_bboxes(
+        self,
+        bboxes: Sequence[Tuple[float, float, float, float]],
+    ) -> Optional[Tuple[float, float, float, float]]:
+        if not bboxes:
+            return None
+        return (
+            min(bbox[0] for bbox in bboxes),
+            min(bbox[1] for bbox in bboxes),
+            max(bbox[2] for bbox in bboxes),
+            max(bbox[3] for bbox in bboxes),
+        )
 
     def _make_generated_body_block(self) -> Dict[str, Any]:
         # DTBook 2005-3 では level1 が h1 だけで終わると不完全になるため、
@@ -450,6 +732,13 @@ class TextDaisyExporter:
             "image",
         }
 
+    def _is_table_block_type(self, block_type: str) -> bool:
+        normalized = block_type.strip().lower()
+        return block_type.strip() == self.TABLE_BLOCK_TYPE or normalized in {
+            "block_table",
+            "table",
+        }
+
     def _make_figure_block(self, block_elem: ET.Element) -> Dict[str, Any]:
         figure_label = self._figure_label(block_elem)
         return {
@@ -459,7 +748,7 @@ class TextDaisyExporter:
             "generated": False,
             "figure": {
                 "alt": figure_label,
-                "src": self.FIGURE_PLACEHOLDER_FILE,
+                "src": "",
                 "source_type": block_elem.attrib.get("TYPE", self.FIGURE_BLOCK_TYPE),
                 "x": block_elem.attrib.get("X", ""),
                 "y": block_elem.attrib.get("Y", ""),
@@ -467,23 +756,166 @@ class TextDaisyExporter:
                 "height": block_elem.attrib.get("HEIGHT", ""),
                 "conf": block_elem.attrib.get("CONF", ""),
             },
-            # 画像要素そのものは SMIL の text 参照先にできない再生環境があるため、
-            # 同期・読み上げ用に説明文を p/sent として続けて出力する。
-            "lines": [
-                {
-                    "text": figure_label,
-                    "line_type": self.FIGURE_BLOCK_TYPE,
-                    "generated": True,
-                }
-            ],
+            "lines": [],
         }
 
     def _figure_label(self, block_elem: ET.Element) -> str:
         for key in ("ALT", "alt", "TITLE", "title", "LABEL", "label"):
             value = block_elem.attrib.get(key)
             if value and str(value).strip():
-                return str(value).strip()
-        return self.FIGURE_BLOCK_TYPE
+                label = str(value).strip()
+                if label != self.FIGURE_BLOCK_TYPE:
+                    return label
+        return ""
+
+    def _write_figure_images(
+        self,
+        sections: List[Dict[str, Any]],
+        pages: List[Dict[str, Any]],
+        book_dir: Path,
+    ) -> None:
+        figures_by_page: Dict[int, List[Dict[str, Any]]] = {}
+        for block in self._iter_figure_blocks(sections):
+            page_no = int(block.get("page_no", 0))
+            figures_by_page.setdefault(page_no, []).append(block)
+
+        if not figures_by_page:
+            return
+
+        pages_by_no = {
+            int(page.get("page_no", index)): page
+            for index, page in enumerate(pages, start=1)
+        }
+        image_dir = book_dir / self.FIGURE_IMAGE_DIR
+        image_dir.mkdir(parents=True, exist_ok=True)
+
+        for page_no, figure_blocks in figures_by_page.items():
+            page = pages_by_no.get(page_no)
+            if page is None:
+                raise ValueError(f"Source page {page_no} for a DAISY figure was not found.")
+
+            source_image = self._load_source_page_image(page)
+            try:
+                coordinate_scale = self._source_coordinate_scale(page)
+                for figure_index, block in enumerate(figure_blocks, start=1):
+                    figure = block.get("figure", {}) or {}
+                    crop_box = self._figure_crop_box(
+                        figure,
+                        source_image.width,
+                        source_image.height,
+                        page_no,
+                        coordinate_scale,
+                    )
+                    figure_image = source_image.crop(crop_box)
+                    figure_image.thumbnail(
+                        (self.FIGURE_MAX_WIDTH_PX, self.FIGURE_MAX_HEIGHT_PX),
+                        Image.Resampling.LANCZOS,
+                    )
+
+                    filename = f"{page_no}-{figure_index}.jpg"
+                    relative_path = f"{self.FIGURE_IMAGE_DIR}/{filename}"
+                    figure_image.save(
+                        image_dir / filename,
+                        format="JPEG",
+                        quality=self.FIGURE_JPEG_QUALITY,
+                        dpi=(self.FIGURE_DPI, self.FIGURE_DPI),
+                    )
+                    figure["src"] = relative_path
+                    figure["pixel_width"] = figure_image.width
+                    figure["pixel_height"] = figure_image.height
+                    block["figure"] = figure
+            finally:
+                source_image.close()
+
+    def _load_source_page_image(self, page: Dict[str, Any]) -> Image.Image:
+        image_path_value = page.get("image_path")
+        page_no = int(page.get("page_no", 0))
+        if not image_path_value:
+            raise ValueError(
+                f"Source image path is required to export figures on page {page_no}."
+            )
+
+        image_path = Path(str(image_path_value))
+        if not image_path.is_file():
+            raise FileNotFoundError(
+                f"Source image for DAISY figures was not found: {image_path}"
+            )
+
+        if image_path.suffix.lower() != ".pdf":
+            with Image.open(image_path) as source_image:
+                return source_image.convert("RGB")
+
+        source_page_index = page.get("source_page_index")
+        if source_page_index is None:
+            raise ValueError(
+                f"PDF page index is required to export figures on page {page_no}."
+            )
+
+        try:
+            import pypdfium2
+        except ImportError as exc:
+            raise RuntimeError(
+                "pypdfium2 is required to export DAISY figures from PDF input."
+            ) from exc
+
+        pdf_document = pypdfium2.PdfDocument(str(image_path))
+        try:
+            rendered_pages = pdf_document.render(
+                pypdfium2.PdfBitmap.to_pil,
+                page_indices=[int(source_page_index)],
+                scale=self.FIGURE_DPI / 72.0,
+            )
+            return next(iter(rendered_pages)).convert("RGB")
+        finally:
+            pdf_document.close()
+
+    def _source_coordinate_scale(self, page: Dict[str, Any]) -> float:
+        image_path_value = page.get("image_path")
+        if not image_path_value or Path(str(image_path_value)).suffix.lower() != ".pdf":
+            return 1.0
+        source_dpi = float(page.get("source_dpi") or self.FIGURE_DPI)
+        if source_dpi <= 0:
+            raise ValueError("Source PDF DPI must be greater than zero.")
+        return self.FIGURE_DPI / source_dpi
+
+    def _figure_crop_box(
+        self,
+        figure: Dict[str, Any],
+        image_width: int,
+        image_height: int,
+        page_no: int,
+        coordinate_scale: float = 1.0,
+    ) -> Tuple[int, int, int, int]:
+        try:
+            x = float(figure["x"])
+            y = float(figure["y"])
+            width = float(figure["width"])
+            height = float(figure["height"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Figure coordinates on page {page_no} are incomplete."
+            ) from exc
+
+        left = max(0, math.floor(x * coordinate_scale))
+        top = max(0, math.floor(y * coordinate_scale))
+        right = min(image_width, math.ceil((x + width) * coordinate_scale))
+        bottom = min(image_height, math.ceil((y + height) * coordinate_scale))
+        if width <= 0 or height <= 0 or right <= left or bottom <= top:
+            raise ValueError(
+                f"Figure coordinates on page {page_no} are outside the source image."
+            )
+        return left, top, right, bottom
+
+    def _iter_figure_blocks(
+        self,
+        sections: List[Dict[str, Any]],
+    ) -> Iterable[Dict[str, Any]]:
+        return (
+            block
+            for section in sections
+            for block in section.get("blocks", [])
+            if block.get("is_figure")
+        )
 
     def _is_title_line(self, line: Dict[str, Any]) -> bool:
         line_type = str(line.get("line_type", "")).strip()
@@ -529,7 +961,7 @@ class TextDaisyExporter:
                 copied_block = self._copy_block(block)
                 copied_block["page_no"] = page_no
 
-                if copied_block.get("is_heading"):
+                if self._block_is_heading(copied_block):
                     # タイトル本文が出たら、そこで前セクションを閉じて新ファイルを開始する。
                     append_current()
                     current = new_section()
@@ -559,20 +991,25 @@ class TextDaisyExporter:
     def _copy_block(self, block: Dict[str, Any]) -> Dict[str, Any]:
         copied = dict(block)
         copied["lines"] = [dict(line) for line in block.get("lines", [])]
+        if block.get("figure") is not None:
+            copied["figure"] = dict(block["figure"])
         copied.pop("phrases", None)
         copied.pop("id", None)
         return copied
 
-    def _ensure_sections_start_with_heading(self, sections: List[Dict[str, Any]]) -> None:
-        """各セクションの level1 直下が必ず h1 から始まるようにする。
+    def _ensure_sections_have_single_heading(
+        self,
+        sections: List[Dict[str, Any]],
+    ) -> None:
+        """各セクションの level1 直下を、ちょうど1つの h1 から始める。
 
         TEXT DAISY 3 / DTBook 2005-3 では、level1 の構造を安定させるため、
         セクション冒頭に見出しを置く。元の NDLOCR-Lite XML に
-        TYPE="タイトル本文" が無いまま始まるセクションでは、書名を補助見出しとして追加する。
+        TYPE="タイトル本文" が無い場合は書名を補助見出しとして追加し、
+        複数の見出しが含まれる場合は1つへ統合する。
         """
         for section in sections:
             blocks = section.get("blocks", [])
-
             if not blocks:
                 generated_heading = self._make_generated_heading_block()
                 if section.get("page_nos"):
@@ -580,17 +1017,41 @@ class TextDaisyExporter:
                 section["blocks"] = [generated_heading]
                 continue
 
-            first_block = blocks[0]
-            if bool(first_block.get("is_heading")):
-                continue
+            heading_blocks = [
+                block for block in blocks if self._block_is_heading(block)
+            ]
+            if not heading_blocks:
+                heading = self._make_generated_heading_block()
+                heading["page_no"] = blocks[0].get(
+                    "page_no",
+                    section.get("page_nos", [1])[0] if section.get("page_nos") else 1,
+                )
+            else:
+                heading = self._copy_block(
+                    next(
+                        (
+                            block
+                            for block in heading_blocks
+                            if not block.get("generated")
+                        ),
+                        heading_blocks[0],
+                    )
+                )
+                heading["lines"] = [
+                    dict(line)
+                    for block in heading_blocks
+                    for line in block.get("lines", [])
+                ]
+                heading["generated"] = all(
+                    bool(block.get("generated")) for block in heading_blocks
+                )
 
-            generated_heading = self._make_generated_heading_block()
-            generated_heading["page_no"] = first_block.get(
-                "page_no",
-                section.get("page_nos", [1])[0] if section.get("page_nos") else 1,
-            )
-            blocks.insert(0, generated_heading)
-            section["blocks"] = blocks
+            heading["tag"] = "h1"
+            heading["is_heading"] = True
+            body_blocks = [
+                block for block in blocks if not self._block_is_heading(block)
+            ]
+            section["blocks"] = [heading, *body_blocks]
 
     def _ensure_sections_have_body(self, sections: List[Dict[str, Any]]) -> None:
         """各セクションの level1 が h1 だけで終わらないようにする。"""
@@ -603,7 +1064,7 @@ class TextDaisyExporter:
                 ]
                 continue
 
-            has_body = any(not bool(block.get("is_heading")) for block in blocks)
+            has_body = any(not self._block_is_heading(block) for block in blocks)
             if not has_body:
                 generated = self._make_generated_body_block()
                 if section.get("page_nos"):
@@ -638,14 +1099,28 @@ class TextDaisyExporter:
                 block_index += 1
 
                 block_phrases: List[Dict[str, Any]] = []
-                for line in block.get("lines", []):
+                phrase_units = self._phrase_units_for_block(block)
+                if block.get("is_figure"):
+                    phrase_units = [
+                        {
+                            "text": "",
+                            "line_type": self.FIGURE_BLOCK_TYPE,
+                            "generated": False,
+                            "text_id": self._figure_element_id(block),
+                        }
+                    ]
+
+                for phrase_unit in phrase_units:
                     page_no = int(block.get("page_no") or section.get("page_nos", [1])[0])
                     phrase = {
                         "index": phrase_index,
-                        "text_id": f"t{phrase_index:07d}",
+                        "text_id": phrase_unit.get(
+                            "text_id",
+                            f"t{phrase_index:07d}",
+                        ),
                         "par_id": f"phr{phrase_index:05d}",
-                        "text": str(line.get("text", "")),
-                        "line_type": str(line.get("line_type", "")),
+                        "text": phrase_unit["text"],
+                        "line_type": phrase_unit["line_type"],
                         "page_no": page_no,
                         "page_label": page_index.get(page_no, {}).get("label", f"page-{page_no}"),
                         "block_id": block["id"],
@@ -653,7 +1128,9 @@ class TextDaisyExporter:
                         "section_index": section["index"],
                         "dtbook_file": section["dtbook_file"],
                         "smil_file": section["smil_file"],
-                        "generated": bool(block.get("generated") or line.get("generated")),
+                        "generated": bool(
+                            block.get("generated") or phrase_unit["generated"]
+                        ),
                     }
                     phrases.append(phrase)
                     section["phrases"].append(phrase)
@@ -669,7 +1146,7 @@ class TextDaisyExporter:
                     phrase_index += 1
 
                 block["phrases"] = block_phrases
-                if block.get("is_heading") and block_phrases:
+                if self._block_is_heading(block) and block_phrases:
                     section["heading_blocks"].append(block)
 
             if section["first_phrase"] is None and section.get("phrases"):
@@ -709,6 +1186,127 @@ class TextDaisyExporter:
 
         return phrases
 
+    def _phrase_units_for_block(self, block: Dict[str, Any]) -> List[Dict[str, Any]]:
+        lines = block.get("lines", [])
+        text = "".join(str(line.get("text", "")) for line in lines)
+        if not text:
+            return []
+        text = self._normalize_parentheses(text)
+
+        line_type = next(
+            (
+                str(line.get("line_type", ""))
+                for line in lines
+                if str(line.get("line_type", "")).strip()
+            ),
+            "",
+        )
+        generated = any(bool(line.get("generated")) for line in lines)
+        return [
+            {
+                "text": phrase_text,
+                "line_type": line_type,
+                "generated": generated,
+            }
+            for phrase_text in self._split_text_at_punctuation(text)
+        ]
+
+    def _split_text_at_punctuation(self, text: str) -> List[str]:
+        phrases: List[str] = []
+        phrase_start = 0
+        index = 0
+
+        while index < len(text):
+            if text[index] not in self.PHRASE_DELIMITERS:
+                index += 1
+                continue
+
+            phrase_end = index + 1
+            while (
+                phrase_end < len(text)
+                and (
+                    text[phrase_end] in self.PHRASE_DELIMITERS
+                    or text[phrase_end] in self.PUNCTUATION_CLOSERS
+                )
+            ):
+                phrase_end += 1
+
+            phrase = text[phrase_start:phrase_end]
+            if phrase:
+                phrases.append(phrase)
+            phrase_start = phrase_end
+            index = phrase_end
+
+        if phrase_start < len(text):
+            phrases.append(text[phrase_start:])
+        return phrases or [text]
+
+    def _normalize_parentheses(self, text: str) -> str:
+        opening_parentheses = {"(", "（"}
+        closing_parentheses = {")", "）"}
+        stack: List[int] = []
+        pairs: List[Tuple[int, int]] = []
+        paired_indices = set()
+
+        for index, character in enumerate(text):
+            if character in opening_parentheses:
+                stack.append(index)
+            elif character in closing_parentheses and stack:
+                opening_index = stack.pop()
+                pairs.append((opening_index, index))
+                paired_indices.update((opening_index, index))
+
+        replacements: Dict[int, str] = {}
+        for opening_index, closing_index in pairs:
+            before = self._nearest_non_space(text, opening_index - 1, -1)
+            after = self._nearest_non_space(text, closing_index + 1, 1)
+            use_full_width = self._is_full_width(before) or self._is_full_width(after)
+            replacements[opening_index] = "（" if use_full_width else "("
+            replacements[closing_index] = "）" if use_full_width else ")"
+
+        for index, character in enumerate(text):
+            if (
+                index in paired_indices
+                or character not in opening_parentheses | closing_parentheses
+            ):
+                continue
+            before = self._nearest_non_space(text, index - 1, -1)
+            after = self._nearest_non_space(text, index + 1, 1)
+            use_full_width = self._is_full_width(before) or self._is_full_width(after)
+            if character in opening_parentheses:
+                replacements[index] = "（" if use_full_width else "("
+            else:
+                replacements[index] = "）" if use_full_width else ")"
+
+        return "".join(
+            replacements.get(index, character)
+            for index, character in enumerate(text)
+        )
+
+    def _nearest_non_space(
+        self,
+        text: str,
+        index: int,
+        step: int,
+    ) -> Optional[str]:
+        while 0 <= index < len(text):
+            if not text[index].isspace():
+                return text[index]
+            index += step
+        return None
+
+    def _is_full_width(self, character: Optional[str]) -> bool:
+        return bool(
+            character
+            and unicodedata.east_asian_width(character) in {"F", "W"}
+        )
+
+    def _block_is_heading(self, block: Dict[str, Any]) -> bool:
+        tag = str(block.get("tag", "")).strip().lower()
+        return bool(block.get("is_heading")) or bool(
+            re.fullmatch(r"h[1-6]", tag)
+        )
+
     def _build_dtbook(self, section: Dict[str, Any]) -> str:
         body: List[str] = []
 
@@ -745,22 +1343,15 @@ class TextDaisyExporter:
 
             if block.get("is_figure"):
                 body.extend(self._build_dtbook_figure_block(block))
-                if not phrases:
-                    continue
-
-                body.append('        <p class="figure-description">')
-                for phrase in phrases:
-                    body.append(
-                        f'          <sent id="{phrase["text_id"]}" '
-                        f'smilref="{section["smil_file"]}#{phrase["par_id"]}">'
-                        f'{self._xml(phrase["text"])}'
-                        f'</sent>'
-                    )
-                body.append("        </p>")
                 continue
 
             tag = block.get("tag", "p")
-            body.append(f"        <{tag}>")
+            tag_attributes = (
+                ' class="text-indent: 1em;"'
+                if tag == "p" and block.get("text_indent")
+                else ""
+            )
+            body.append(f"        <{tag}{tag_attributes}>")
             for phrase in phrases:
                 body.append(
                     f'          <sent id="{phrase["text_id"]}" '
@@ -779,42 +1370,30 @@ class TextDaisyExporter:
 
     def _build_dtbook_figure_block(self, block: Dict[str, Any]) -> List[str]:
         figure = block.get("figure", {}) or {}
-        figure_id = self._xml(f'img_{block.get("id", "figure")}')
-        src = self._xml(figure.get("src", self.FIGURE_PLACEHOLDER_FILE))
-        alt = self._xml(figure.get("alt", self.FIGURE_BLOCK_TYPE) or self.FIGURE_BLOCK_TYPE)
+        figure_id = self._xml(self._figure_element_id(block))
+        src = self._xml(figure.get("src", ""))
+        alt = self._xml(figure.get("alt", ""))
 
         attrs = [
             f'id="{figure_id}"',
             f'src="{src}"',
             f'alt="{alt}"',
         ]
+        phrases = block.get("phrases", [])
+        if phrases:
+            attrs.append(
+                f'smilref="{self._xml(phrases[0]["smil_file"])}'
+                f'#{self._xml(phrases[0]["par_id"])}"'
+            )
 
-        # 元XMLの座標を DTBook の妥当性に影響しない class/title 等へは入れず、
-        # 必要最小限の img 属性に限定する。詳細説明は後続 p/sent 側で同期する。
         return [
             '        <imggroup>',
             f'          <img {" ".join(attrs)} />',
             '        </imggroup>',
         ]
 
-    def _sections_have_figures(self, sections: List[Dict[str, Any]]) -> bool:
-        return any(
-            bool(block.get("is_figure"))
-            for section in sections
-            for block in section.get("blocks", [])
-        )
-
-    def _build_figure_placeholder_svg(self) -> str:
-        return "\n".join(
-            [
-                '<?xml version="1.0" encoding="UTF-8"?>',
-                '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1">',
-                '  <title>図版</title>',
-                '  <desc>NDLOCR-Lite XML の BLOCK TYPE="図版" に対応するプレースホルダー画像です。</desc>',
-                '</svg>',
-                '',
-            ]
-        )
+    def _figure_element_id(self, block: Dict[str, Any]) -> str:
+        return f'img_{block.get("id", "figure")}'
 
     def _build_smil(self, section: Dict[str, Any]) -> str:
         body: List[str] = []
@@ -1022,10 +1601,15 @@ class TextDaisyExporter:
                 f'media-type="application/smil"/>'
             )
 
-        if self._sections_have_figures(sections):
+        for figure_index, block in enumerate(
+            self._iter_figure_blocks(sections),
+            start=1,
+        ):
+            figure = block.get("figure", {}) or {}
             body.append(
-                f'    <item id="figure_placeholder" href="{self.FIGURE_PLACEHOLDER_FILE}" '
-                f'media-type="image/svg+xml"/>'
+                f'    <item id="figure{figure_index:05d}" '
+                f'href="{self._xml(figure.get("src", ""))}" '
+                f'media-type="image/jpeg"/>'
             )
 
         body.append(f'    <item id="css" href="{self.CSS_FILE}" media-type="text/css"/>')
@@ -1082,12 +1666,23 @@ class TextDaisyExporter:
 
     def _safe_identifier_for_asset_name(self, identifier: str) -> str:
         candidate = identifier.rsplit(":", 1)[-1].strip() or "textdaisy"
-        return self._safe_filename(candidate)
+        candidate = quote(candidate, safe="-_.")
+        candidate = re.sub(r"%", "_", candidate)
+        candidate = re.sub(r"[^A-Za-z0-9._-]+", "_", candidate)
+        return candidate[:120] or "textdaisy"
 
     def _safe_filename(self, value: str) -> str:
-        # DAISY 3 の URI 互換性を考慮し、出力フォルダ名・参照ファイル名を ASCII 中心に寄せる。
         value = value.strip() or "textdaisy"
-        value = quote(value, safe="-_.")
-        value = re.sub(r"%", "_", value)
-        value = re.sub(r"[^A-Za-z0-9._-]+", "_", value)
-        return value[:120] or "textdaisy"
+        value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value)
+        value = value.rstrip(" .") or "textdaisy"
+        reserved_name = value.split(".", 1)[0].upper()
+        if reserved_name in {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            *(f"COM{index}" for index in range(1, 10)),
+            *(f"LPT{index}" for index in range(1, 10)),
+        }:
+            value = f"_{value}"
+        return value

@@ -1,4 +1,6 @@
 # NDLOCR-Liteアプリケーションのリポジトリ
+**（2026/11/24追記）v2から読書バリアフリー機能を強化しています。また、PyPIによるインストールに対応しています。**
+
 **（2026/04/24追記）v1.2から手書き文字の認識等を強化しています。**
 
 NDLOCR-Liteを利用してテキスト化を実行するためのアプリケーションを提供するリポジトリです。
@@ -35,15 +37,12 @@ https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md
 
 ## コマンドラインからの利用
 
-※コマンドラインから操作を行うにはPython 3.10以上が必要です。
+※コマンドラインから操作を行うにはPython 3.11以上が必要です。
 
 事前準備
 
 ```bash
-git clone https://github.com/ndl-lab/ndlocr-lite
-cd ndlocr-lite
-pip install -r requirements.txt
-cd src
+pip install ndlocr-lite
 ```
 
 実行例1.（同階層にある「9892834_0001」という名称のディレクトリ内の画像を一括処理し、tmpdirという名称のディレクトリに結果を出力する。）
@@ -73,6 +72,18 @@ uv tool install .
 ```bash
 ndlocr-lite --sourceimg digidepo_1287221_00000002.jpg --output tmpdir 
 ```
+
+PyPIから導入する場合、現時点のCLI版は開発版のため、`--pre`を指定してください（Python 3.11以上が必要です）。
+
+```bash
+pip install --pre ndlocr-lite
+# uvの場合
+uv tool install --prerelease allow ndlocr-lite
+```
+
+pip/uvでインストールする配布物にはONNXモデルを含めません。`ndlocr-lite`の初回OCR実行時に、未指定のモデルを`https://lab.ndl.go.jp/dataset/ndlocr-lite/onnx/v2/`から取得し、SHA-256を検証してユーザーのキャッシュに保存します。初回はネット接続と約157 MBの空き容量が必要です。以降はキャッシュを再利用します。`--help`と`--version`ではダウンロードしません。
+
+キャッシュ先はWindowsでは`%LOCALAPPDATA%\ndlocr-lite\models\v2`、macOSでは`~/Library/Caches/ndlocr-lite/models/v2`、Linuxでは`${XDG_CACHE_HOME:-~/.cache}/ndlocr-lite/models/v2`です。各`--*-weights`オプションで指定したファイルはそのまま使用します。GUI版と`python ocr.py`は従来どおり同梱モデルを使用し、ダウンロードしません。
 
 ### パラメータの説明
 
@@ -123,19 +134,20 @@ OCR結果を保存する出力先ディレクトリを相対パスまたは絶�
 
 [NDLOCR ver.2.1の評価結果](https://lab.ndl.go.jp/data_set/r4ocr/r4_software#5-3-文字認識性能の評価結果)と同様の評価用データセット・同様の評価手法による値です。
 
-### 手書き文字に対する評価(NDLOCR-Lite ver.1.2.1)
+### 手書き文字に対する評価(NDLOCR-Lite ver.2.0.0)
 
 Maeda, K., & Okazaki, N. JaWildText: A Benchmark for Vision-Language Models on Japanese Scene Text Understanding. arXiv preprint arXiv:2603.27942, 2026.(<https://arxiv.org/abs/2603.27942>)
 
 によって作成された[JaWildText（外部サイト）](https://huggingface.co/datasets/llm-jp/jawildtext)のうち、手書き文字データセット1,065画像を用いて評価しました。
 
-全体平均CER : 0.268 (対象: 1065 ファイル)
+全体CER（中央値） : 0.1327  全体F値（中央値）　： 0.8927 (対象: 1065 ファイル)
 
-縦書き平均CER : 0.279 (対象: 295 ファイル)
+縦書きCER（中央値） : 0.1776  縦書きF値（中央値）　： 0.8536 (対象: 295 ファイル)
 
-横書き平均CER : 0.264 (対象: 768 ファイル)
+横書きCER（中央値） : 0.1156 横書きF値（中央値）　： 0.9050  (対象: 768 ファイル)
 
 ※CER(Character Error Rate、文字誤り率):0から1までの範囲を取り、0に近いほど高い性能を表すスコア
+
 
 ## モデルの再学習及びカスタマイズについて（開発者向け情報）
 
@@ -145,10 +157,12 @@ Maeda, K., & Okazaki, N. JaWildText: A Benchmark for Vision-Language Models on J
 
 NDLOCR-Liteは「レイアウト認識」、「文字列認識」、「読み順整序」の3つの機能（モジュール）を組み合わせて実現しています。
 
-レイアウト認識にはDEIMv2[1]、文字列認識にはPARSeq[2]をそれぞれ用いており、読み順整序については当館が公開している[NDLOCR](https://github.com/ndl-lab/ndlocr_cli)と同様のモジュールを用いています。
+レイアウト認識にはDEIMv2[1]、文字列認識にはPARSeq[2]、表構造認識にはTableCenterNet[3]をそれぞれ用いており、読み順整序については当館が公開している[NDLOCR](https://github.com/ndl-lab/ndlocr_cli)と同様のモジュールを用いています。
 
-[1]Shihua Huang and Yongjie Hou and Longfei Liu and Xuanlong Yu and Xi Shen. Real-Time Object Detection Meets DINOv3. arXiv preprint arXiv:2509.20787, 2025.(<https://arxiv.org/abs/2509.20787>)
+[1]Shihua Huang and Yongjie Hou and Longfei Liu and Xuanlong Yu and Xi Shen. Real-Time Object Detection Meets DINOv3. arXiv:2509.20787, 2025.(<https://arxiv.org/abs/2509.20787>)
 
 [2]Darwin Bautista, Rowel Atienza. Scene text recognition with permuted autoregressive sequence models. arXiv:2212.06966, 2022. (<https://arxiv.org/abs/2207.06966>)
+
+[3]Anyi Xiao and Cihui Yang. TableCenterNet: A one-stage network for table structure recognition. arXiv:2504.17522, 2025. (<https://arxiv.org/abs/2504.17522>)
 
 レイアウト認識及び文字列認識の機械学習モデルは、いずれもpytorchをフレームワークとした学習を行った後にONNX形式に変換して利用しています。詳しくは[学習及びモデル変換手順](/train/README.md)をご覧ください。

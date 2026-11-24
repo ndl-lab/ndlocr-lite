@@ -70,7 +70,7 @@ class CliArgumentsTest(unittest.TestCase):
         with patch("model_download.resolve_model_paths") as resolve:
             args = self.parse_cli()
         resolve.assert_not_called()
-        self.assertTrue(args.det_weights.endswith("deim-s-1024x1024.onnx"))
+        self.assertTrue(args.det_weights.endswith("deim-s-1024x1024-261124.onnx"))
 
     def test_packaged_cli_resolves_default_models(self):
         argv = ["ndlocr-lite", "--sourceimg", "sample.png", "--output", "output",

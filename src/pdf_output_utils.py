@@ -14,15 +14,28 @@ def build_single_page_xml(page_xml: str) -> str:
     return f"<OCRDATASET>\n{page_xml}\n</OCRDATASET>"
 
 
-def build_pdf_page_json_obj(page_result: dict, source_path: str, include_xml: bool = False) -> dict:
+def build_pdf_page_json_obj(
+    page_result: dict,
+    source_path: str,
+    include_xml: bool = False,
+    *,
+    source_page_index: int | None = None,
+    source_dpi: float | None = None,
+) -> dict:
+    imginfo = {
+        "img_width": page_result["img_width"],
+        "img_height": page_result["img_height"],
+        "img_path": source_path,
+        "img_name": page_result["img_name"],
+    }
+    if source_page_index is not None:
+        imginfo["source_page_index"] = source_page_index
+    if source_dpi is not None:
+        imginfo["source_dpi"] = source_dpi
+
     page_json_obj = {
         "contents": [page_result["json_lines"]],
-        "imginfo": {
-            "img_width": page_result["img_width"],
-            "img_height": page_result["img_height"],
-            "img_path": source_path,
-            "img_name": page_result["img_name"],
-        },
+        "imginfo": imginfo,
     }
     if include_xml:
         page_json_obj["xml"] = build_single_page_xml(page_result["page_xml"])
@@ -42,12 +55,15 @@ def write_pdf_page_outputs(
     write_tei: bool = False,
     convert_tei_func=None,
     include_xml_in_json: bool = False,
+    source_dpi: float | None = None,
 ) -> dict:
     page_output_stem = build_pdf_page_output_stem(output_stem, page_index)
     page_json_obj = build_pdf_page_json_obj(
         page_result,
         source_path=source_path,
         include_xml=include_xml_in_json,
+        source_page_index=page_index,
+        source_dpi=source_dpi,
     )
 
     if write_xml:

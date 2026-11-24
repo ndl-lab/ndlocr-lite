@@ -2,6 +2,7 @@
 /ocrenv/
 /build/
 /src/ndlocr_lite.egg-info/
+/src/optional_features_bk/
 /__pycache__/
 /ndlocr-lite-gui/build/
 /ndlocr-lite-gui/src/
@@ -11,4 +12,5 @@
 /ndlocr-lite-gui/4ab7ecc3-53fb-b3e7-64e8-a809b5a483d2/
 /4ab7ecc3-53fb-b3e7-64e8-a809b5a483d2/
 **/.venv/**
+**/.flet/**
 uv.lock

@@ -34,6 +34,27 @@ class ModelDownloadTest(unittest.TestCase):
     def resolve(self):
         return model_download.get_model_path("test.onnx", self.digest, self.bundled)
 
+    def test_v2_models_are_downloaded_from_v2_url(self):
+        self.assertEqual(
+            model_download.MODEL_BASE_URL,
+            "https://lab.ndl.go.jp/dataset/ndlocr-lite/onnx/v2/",
+        )
+        filenames = {
+            "det_weights": "deim-s-1024x1024-261124.onnx",
+            "rec_weights30": "parseq-ndl-24x256-30-tiny-499epoch-261124.onnx",
+            "rec_weights50": "parseq-ndl-24x384-50-tiny-278epoch-261124.onnx",
+            "rec_weights": "parseq-ndl-24x768-100-tiny-153epoch-261124.onnx",
+        }
+        self.assertEqual(set(model_download.MODELS), set(filenames))
+        for option, filename in filenames.items():
+            with self.subTest(option=option):
+                self.assertEqual(model_download.MODELS[option][0], filename)
+                self.network.return_value = io.BytesIO(self.content)
+                model_download.get_model_path(filename, self.digest, self.bundled)
+                self.network.assert_called_with(
+                    model_download.MODEL_BASE_URL + filename, timeout=60
+                )
+
     def test_bundled_model_is_used_without_download(self):
         model = self.bundled / "test.onnx"
         model.write_bytes(self.content)
@@ -96,9 +117,9 @@ class ModelDownloadTest(unittest.TestCase):
 
     def test_cache_locations(self):
         for platform, expected in (
-            ("win32", self.root / "local" / "ndlocr-lite" / "models" / "v1.2"),
-            ("darwin", self.root / "Library" / "Caches" / "ndlocr-lite" / "models" / "v1.2"),
-            ("linux", self.root / "xdg" / "ndlocr-lite" / "models" / "v1.2"),
+            ("win32", self.root / "local" / "ndlocr-lite" / "models" / "v2"),
+            ("darwin", self.root / "Library" / "Caches" / "ndlocr-lite" / "models" / "v2"),
+            ("linux", self.root / "xdg" / "ndlocr-lite" / "models" / "v2"),
         ):
             with self.subTest(platform=platform), patch.object(model_download.sys, "platform", platform), patch.object(Path, "home", return_value=self.root), patch.dict(
                 model_download.os.environ,

@@ -6,6 +6,14 @@ import numpy as np
 import cv2
 from typing import Tuple, List
 
+
+def _remove_ascii_spaces_around_japanese_punctuation(text: str) -> str:
+    for punctuation in "、。":
+        text = text.replace(f" {punctuation}", punctuation)
+        text = text.replace(f"{punctuation} ", punctuation)
+    return text
+
+
 class PARSEQ:
     def __init__(self,
                  model_path: str,
@@ -30,10 +38,8 @@ class PARSEQ:
             opt_session.intra_op_num_threads = 1
             opt_session.inter_op_num_threads = 1
         elif self.device.casefold() == "cuda":
-            providers = [('CUDAExecutionProvider', {'device_id': 0}), 'CPUExecutionProvider']
+            providers = ['CUDAExecutionProvider','CPUExecutionProvider']
         session = onnxruntime.InferenceSession(self.model_path,opt_session, providers=providers)
-        if self.device.casefold() == "cuda" and 'CUDAExecutionProvider' not in session.get_providers():
-            print('警告: CUDAExecutionProvider が利用できないため CPUExecutionProvider にフォールバックしました。onnxruntime-gpu と CUDA 環境を確認してください。')
         self.session = session
         self.model_inputs = self.session.get_inputs()
         self.input_names = [self.model_inputs[i].name for i in range(len(self.model_inputs))]
@@ -71,4 +77,4 @@ class PARSEQ:
         end_pos = stop_idx[0] if stop_idx.size > 0 else len(indices)
         resval = indices[:end_pos].tolist()
         resstr = "".join([self.charlist[i - 1] for i in resval])
-        return resstr
+        return _remove_ascii_spaces_around_japanese_punctuation(resstr)
