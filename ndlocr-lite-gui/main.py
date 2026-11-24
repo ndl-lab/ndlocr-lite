@@ -10,12 +10,17 @@ from pathlib import Path
 import threading
 
 APP_DIR = Path(__file__).resolve().parent
-SOURCE_DIR = APP_DIR / 'src'
-if not SOURCE_DIR.is_dir():
-    # Source checkout: CI/builds copy src beside main.py, while local development
-    # uses the repository's top-level src directory directly.
+if __package__:
     SOURCE_DIR = APP_DIR.parent / 'src'
-sys.path.append(str(SOURCE_DIR))
+    if not SOURCE_DIR.is_dir():
+        # Wheels install the OCR modules and config beside the GUI package.
+        SOURCE_DIR = APP_DIR.parent
+else:
+    SOURCE_DIR = APP_DIR / 'src'
+    if not SOURCE_DIR.is_dir():
+        SOURCE_DIR = APP_DIR.parent / 'src'
+if str(SOURCE_DIR) not in sys.path:
+    sys.path.append(str(SOURCE_DIR))
 
 import xml.etree.ElementTree as ET
 import time
@@ -28,7 +33,10 @@ import io
 import glob
 import ctypes
 from io import BytesIO
-from gui_config import build_default_config
+if __package__:
+    from .gui_config import build_default_config
+else:
+    from gui_config import build_default_config
 from uicomponent.localelabel import TRANSLATIONS
 from uicomponent.textdaisy import TextDaisyExporter
 from collections import Counter
@@ -318,8 +326,12 @@ def process_cascade(alllineobj: RecogLine, recognizer30, recognizer50, recognize
     return [t.pred_str for t in targetdflistall]
 
 
-def load_ocr_models(args):
+def load_ocr_models(args, download_models=False):
     """Create the four independent ONNX sessions concurrently."""
+    if download_models:
+        from model_download import resolve_model_paths
+
+        resolve_model_paths(args, SOURCE_DIR / 'model')
     load_runtime_modules()
     if hasattr(ocr, '_load_charlist'):
         ocr._load_charlist(os.path.abspath(args.rec_classes))
@@ -334,6 +346,16 @@ def load_ocr_models(args):
             recognizer30_future.result(),
             recognizer50_future.result(),
         )
+
+
+def load_table_recognizer(args, download_models=False):
+    if download_models and args.table_weights is None:
+        from model_download import get_model_path, TABLE_MODEL
+
+        args.table_weights = str(get_model_path(*TABLE_MODEL, SOURCE_DIR / 'model'))
+    recognizer = TABLE_STRUCTURE_FEATURE.create_recognizer(args)
+    recognizer.load()
+    return recognizer
 
 
 def load_rgb_image_array(input_path: str) -> 'np.ndarray':
@@ -1024,7 +1046,7 @@ class CaptureTool:
             self.page.pop_dialog()
         self.page.show_dialog(self.dialog)
 
-def main(page: ft.Page):
+def parse_gui_args(argv=None, download_models=False):
     parser = argparse.ArgumentParser(description='Argument for Inference using ONNXRuntime')
     parser.add_argument('--det-weights', type=str, required=False, help='Path to rtmdet onnx file', default=str(SOURCE_DIR / 'model' / 'deim-s-1024x1024-261124.onnx'))
     parser.add_argument('--det-classes', type=str, required=False, help='Path to list of class in yaml file', default=str(SOURCE_DIR / 'config' / 'ndl.yaml'))
@@ -1040,10 +1062,21 @@ def main(page: ft.Page):
     parser.add_argument('--device', type=str, required=False, help='Device use (cpu or cuda)', choices=['cpu', 'cuda'], default='cpu')
     if TABLE_STRUCTURE_FEATURE is not None:
         TABLE_STRUCTURE_FEATURE.add_arguments(parser, SOURCE_DIR)
-    # Flet and test runners may append their own process arguments. Keep the
-    # GUI's OCR options while leaving unrelated host arguments untouched.
-    args, _ = parser.parse_known_args()
+    if download_models:
+        from model_download import MODELS
 
+        parser.set_defaults(**{option: None for option in MODELS})
+        if TABLE_STRUCTURE_FEATURE is not None:
+            parser.set_defaults(table_weights=None)
+        return parser.parse_args(argv)
+    # Standalone Flet builds may append their own host arguments.
+    args, _ = parser.parse_known_args(argv)
+    return args
+
+
+def main(page: ft.Page, args=None, download_models=False):
+    if args is None:
+        args = parse_gui_args(download_models=download_models)
     page.title = 'NDLOCR-Lite-GUI v{}'.format(__version__)
     page.theme_mode = ft.ThemeMode.SYSTEM
     page.window.icon = str(ASSETS_DIR / 'icon.png')
@@ -2618,14 +2651,16 @@ def main(page: ft.Page):
                     origin_recognizer,
                     origin_recognizer30,
                     origin_recognizer50,
-                ) = await asyncio.to_thread(load_ocr_models, args)
+                ) = await asyncio.to_thread(
+                    load_ocr_models, args, download_models=download_models
+                )
                 origin_table_recognizer = None
                 model_state['table_error'] = None
                 if TABLE_STRUCTURE_FEATURE is not None:
                     try:
-                        table_recognizer = TABLE_STRUCTURE_FEATURE.create_recognizer(args)
-                        await asyncio.to_thread(table_recognizer.load)
-                        origin_table_recognizer = table_recognizer
+                        origin_table_recognizer = await asyncio.to_thread(
+                            load_table_recognizer, args, download_models=download_models
+                        )
                     except Exception as table_ex:
                         model_state['table_error'] = table_ex
                         print(f'[WARN] Table structure initialization failed: {table_ex}')
