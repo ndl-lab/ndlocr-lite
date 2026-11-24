@@ -19,3 +19,14 @@ names:
   15: block_table
   16: line_title
 
+markdown:
+  0: other # Treat the same as join_next
+  1: join_next # If there is a preceding text layout in the same text box, append it to the end when outputting
+  2: join_br # If there is a preceding text layout in the same text box, append it to the end when outputting, and add a newline character at the end
+  3: other # Treat the same as join_next
+  4: h1 # Treat as an h1 heading
+  5: h2 # Treat as an h2 heading
+  6: h3 # Treat as an h3 heading
+  7: list # Treat as a bulleted list
+  8: list # Treat as a bulleted list
+  9: table_cell # Treat as a cell value in a table

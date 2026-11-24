@@ -15,7 +15,10 @@ class DEIM:
                  score_threshold: float = 0.1,
                  conf_threshold: float = 0.1,
                  iou_threshold: float = 0.4,
-                 device: str = "CPU") -> None:
+                 device: str = "CPU",
+                 overlap_threshold: float = 0.9) -> None:
+        if not 0.0 <= overlap_threshold <= 1.0:
+            raise ValueError("overlap_threshold must be between 0 and 1")
         self.model_path = model_path
         self.class_mapping_path = class_mapping_path
         self.image_width, self.image_height = original_size
@@ -23,6 +26,7 @@ class DEIM:
         self.score_threshold = score_threshold
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
+        self.overlap_threshold = overlap_threshold
         self.colorlist=[(0, 0, 0), (255, 0, 0), (0, 0, 142), (0, 0, 230), (106, 0, 228),
                         (0, 60, 100), (0, 80, 100), (0, 0, 70), (0, 0, 192), (250, 170, 30),
                         (100, 170, 30), (220, 220, 0), (175, 116, 175), (250, 0, 30),(165, 42, 42), (255, 77, 255),(255,0,0)]
@@ -40,10 +44,8 @@ class DEIM:
         #opt_session.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
         providers = ['CPUExecutionProvider']
         if self.device.casefold() == "cuda":
-            providers = [('CUDAExecutionProvider', {'device_id': 0}), 'CPUExecutionProvider']
+            providers = ['CUDAExecutionProvider','CPUExecutionProvider']
         session = onnxruntime.InferenceSession(self.model_path,opt_session, providers=providers)
-        if self.device.casefold() == "cuda" and 'CUDAExecutionProvider' not in session.get_providers():
-            print('警告: CUDAExecutionProvider が利用できないため CPUExecutionProvider にフォールバックしました。onnxruntime-gpu と CUDA 環境を確認してください。')
         self.session = session
         self.model_inputs = self.session.get_inputs()
         self.input_names = [self.model_inputs[i].name for i in range(len(self.model_inputs))]
@@ -53,10 +55,13 @@ class DEIM:
         self.input_height, self.input_width = self.input_shape[2:]
 
         if self.class_mapping_path is not None:
-            with open(self.class_mapping_path, 'r') as file:
+            with open(self.class_mapping_path, 'r', encoding='utf-8') as file:
                 yaml_file = yaml.safe_load(file)
                 self.classes = yaml_file['names']
+                self.markdown_styles = yaml_file.get('markdown', {})
                 self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
+        else:
+            self.markdown_styles = {}
 
     def preprocess(self, img: np.ndarray) -> np.ndarray:
         max_wh=max(img.shape[0],img.shape[1])
@@ -84,21 +89,33 @@ class DEIM:
     
     def postprocess(self, outputs):
         
+        if len(outputs)==6:
+            class_ids,bboxes,scores,char_counts,markdown_style,_=outputs
+            class_ids=np.asarray(class_ids).reshape(-1)
+            predictions = np.asarray(bboxes).reshape(-1, 4)
+            scores=np.asarray(scores).reshape(-1)
+            char_counts=np.asarray(char_counts).reshape(-1)
+            markdown_style=np.asarray(markdown_style).reshape(-1)
         if len(outputs)==4:
             class_ids,bboxes,scores,char_counts=outputs
-            class_ids=np.squeeze(class_ids)
-            predictions = np.squeeze(bboxes)
-            scores=np.squeeze(scores)
-            char_counts=np.squeeze(char_counts)
+            class_ids=np.asarray(class_ids).reshape(-1)
+            predictions = np.asarray(bboxes).reshape(-1, 4)
+            scores=np.asarray(scores).reshape(-1)
+            char_counts=np.asarray(char_counts).reshape(-1)
+            markdown_style=np.array([0]*scores.shape[0])
         elif len(outputs)==3:
             class_ids,bboxes,scores=outputs
-            class_ids=np.squeeze(class_ids)
-            predictions = np.squeeze(bboxes)
-            scores=np.squeeze(scores)
+            class_ids=np.asarray(class_ids).reshape(-1)
+            predictions = np.asarray(bboxes).reshape(-1, 4)
+            scores=np.asarray(scores).reshape(-1)
             char_counts=np.array([100.0]*scores.shape[0])
-
-        predictions = predictions[scores > self.conf_threshold, :]
-        scores = scores[scores > self.conf_threshold]
+            markdown_style=np.array([0]*scores.shape[0])
+        keep = scores > self.conf_threshold
+        predictions = predictions[keep, :]
+        scores = scores[keep]
+        class_ids = class_ids[keep]
+        char_counts = char_counts[keep]
+        markdown_style = markdown_style[keep]
         scales = np.array([
             self.image_width / self.input_width, 
             self.image_height / self.input_width, 
@@ -109,18 +126,53 @@ class DEIM:
         boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0, self.image_width)
         boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0, self.image_height)
         detections = []
-        for bbox, score, label,char_count in zip(boxes, scores, class_ids,char_counts):
+        for bbox, score, label,char_count,m_style in zip(boxes, scores, class_ids,char_counts,markdown_style):
             class_index=int(label)-1
             detections.append({
                 "class_index": class_index,
                 "confidence": score,
                 "box": bbox,
                 "pred_char_count":char_count,
+                "pred_markdown_style":m_style,
                 "class_name": self.classes[class_index]#"line_main"
             })
         #print(len(detections))
         #print(char_counts)
-        return detections
+        return self._suppress_overlapping_regions(detections)
+
+    def _suppress_overlapping_regions(self, detections):
+        """Prefer larger same-label boxes using intersection / smaller area."""
+        if self.overlap_threshold == 0:
+            return detections
+
+        areas = [
+            max(0, int(d["box"][2]) - int(d["box"][0]))
+            * max(0, int(d["box"][3]) - int(d["box"][1]))
+            for d in detections
+        ]
+        kept_by_class = {}
+        suppressed = set()
+        for index in sorted(range(len(detections)), key=lambda i: areas[i], reverse=True):
+            detection = detections[index]
+            area = areas[index]
+            if area <= 0:
+                continue
+            x1, y1, x2, y2 = detection["box"]
+            kept = kept_by_class.setdefault(detection["class_index"], [])
+            for other_index in kept:
+                if areas[other_index] <= area:
+                    continue
+                ox1, oy1, ox2, oy2 = detections[other_index]["box"]
+                intersection = (
+                    max(0, int(min(x2, ox2)) - int(max(x1, ox1)))
+                    * max(0, int(min(y2, oy2)) - int(max(y1, oy1)))
+                )
+                if intersection / area >= self.overlap_threshold:
+                    suppressed.add(index)
+                    break
+            else:
+                kept.append(index)
+        return [d for i, d in enumerate(detections) if i not in suppressed]
     
     def get_label_name(self, class_id: int) -> str:
         return self.classes[class_id]

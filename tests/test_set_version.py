@@ -1,7 +1,9 @@
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 
@@ -9,6 +11,13 @@ SCRIPT = Path(__file__).resolve().parents[1] / "src" / "set_version.py"
 
 
 class SetVersionTest(unittest.TestCase):
+    def test_source_version_matches_project_version(self):
+        root = SCRIPT.parents[1]
+        with (root / "pyproject.toml").open("rb") as stream:
+            project = tomllib.load(stream)
+        namespace = runpy.run_path(str(root / "src" / "version.py"))
+        self.assertEqual(namespace["__version__"], project["project"]["version"])
+
     def run_version(self, version, *options):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

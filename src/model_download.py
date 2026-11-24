@@ -10,22 +10,26 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 
-MODEL_BASE_URL = "https://lab.ndl.go.jp/dataset/ndlocr-lite/onnx/v1.2/"
+MODEL_BASE_URL = "https://lab.ndl.go.jp/dataset/ndlocr-lite/onnx/v2/"
+TABLE_MODEL = (
+    "tablecenternet_s_800_v3.onnx",
+    "fc26e20e0ece97be0d03b495481c33a3982f268966920297061b8c90215cdefa",
+)
 MODELS = {
     "det_weights": (
-        "deim-s-1024x1024.onnx",
-        "c156ce0c4e704bc3bf7e4016d0a87b949cffa8b3724f4b4cc696b8284c3c7373",
+        "deim-s-1024x1024-261124.onnx",
+        "f9a41c8453dd687f370bee199fd6d47ecf583cc14f1d839a0b416db39b356e8c",
     ),
     "rec_weights30": (
-        "parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx",
-        "9e651bae4c1a4d5254da1127e86e82e21ef62d5339b37e62d4a3d3d30831772d",
+        "parseq-ndl-24x256-30-tiny-499epoch-261124.onnx",
+        "063ec5b3201bce79d56c3ad73b5726cf76ec6a82f42e11a89466ae683755296c",
     ),
     "rec_weights50": (
-        "parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx",
-        "49cea9db4552f19eb05c8ee202fcf74714977749b2f4c9376b127fde41b07a99",
+        "parseq-ndl-24x384-50-tiny-278epoch-261124.onnx",
+        "d3dd9e7733aeff5c9f50687c7da6e8d01915a0bf07cfbefe1d9ac58241c61471",
     ),
     "rec_weights": (
-        "parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx",
+        "parseq-ndl-24x768-100-tiny-153epoch-261124.onnx",
         "06462b0dbd5b0b8508545c8c3d485cf20dbf4ffa652fe145e69c9e7457080602",
     ),
 }
@@ -38,7 +42,7 @@ def model_cache_dir():
         root = Path.home() / "Library" / "Caches"
     else:
         root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return root / "ndlocr-lite" / "models" / "v1.2"
+    return root / "ndlocr-lite" / "models" / "v2"
 
 
 def _sha256(path):

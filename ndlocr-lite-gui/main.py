@@ -1,6 +1,7 @@
 import logging
 # logging.basicConfig(filename='debug.log', encoding='utf-8', level=logging.DEBUG)
 import asyncio
+import inspect
 import flet as ft
 from typing import List, Dict, Tuple
 import sys
@@ -9,14 +10,17 @@ from pathlib import Path
 import threading
 
 APP_DIR = Path(__file__).resolve().parent
-SOURCE_DIR = APP_DIR / 'src'
-if __package__ == 'ndlocr_lite_gui':
-    SOURCE_DIR = APP_DIR.parent
-elif not SOURCE_DIR.is_dir():
-    # Source checkout: CI/builds copy src beside main.py, while local development
-    # uses the repository's top-level src directory directly.
+if __package__:
     SOURCE_DIR = APP_DIR.parent / 'src'
-sys.path.append(str(SOURCE_DIR))
+    if not SOURCE_DIR.is_dir():
+        # Wheels install the OCR modules and config beside the GUI package.
+        SOURCE_DIR = APP_DIR.parent
+else:
+    SOURCE_DIR = APP_DIR / 'src'
+    if not SOURCE_DIR.is_dir():
+        SOURCE_DIR = APP_DIR.parent / 'src'
+if str(SOURCE_DIR) not in sys.path:
+    sys.path.append(str(SOURCE_DIR))
 
 import xml.etree.ElementTree as ET
 import time
@@ -29,7 +33,7 @@ import io
 import glob
 import ctypes
 from io import BytesIO
-if __package__ == 'ndlocr_lite_gui':
+if __package__:
     from .gui_config import build_default_config
 else:
     from gui_config import build_default_config
@@ -38,8 +42,10 @@ from uicomponent.textdaisy import TextDaisyExporter
 from collections import Counter
 from optional_features import load_optional_features
 from pdf_output_utils import should_output_pdf_pages_separately, write_pdf_page_outputs
+from character_inclusion import apply_character_inclusion
+from html_output import build_html_document
 from version import __version__
-
+from copy import deepcopy
 name = 'NDLOCR-Lite-GUI'
 
 _feature_modules = load_optional_features()
@@ -102,21 +108,135 @@ def load_runtime_modules():
         _runtime_modules_ready = True
 
 
+def _build_result_markdown(page_result, table_fragments):
+    rendered = ocr.build_markdown_text_from_xml(
+        str(page_result.get('page_xml', '')),
+        table_markdowns=table_fragments,
+        markdown_styles=page_result.get('markdown_styles'),
+    )
+    if rendered or (page_result.get('page_xml') and table_fragments):
+        return rendered
+    return str(page_result.get('markdown_text') or page_result.get('text') or '')
+
+
 def build_gui_result_markdown(page_result, page_tables=None):
-    """Build ft.Markdown content in layout order for one OCR page."""
-    table_fragments = (
+    """Build preview content with links instead of structured table bodies."""
+    fragments = (
+        TABLE_STRUCTURE_FEATURE.preview_fragments(page_tables)
+        if TABLE_STRUCTURE_FEATURE is not None
+        else []
+    )
+    return _build_result_markdown(page_result, fragments)
+
+
+def build_output_result_markdown(page_result, page_tables=None):
+    fragments = (
         TABLE_STRUCTURE_FEATURE.markdown_fragments(page_tables)
         if TABLE_STRUCTURE_FEATURE is not None
         else []
     )
+    return _build_result_markdown(page_result, fragments)
 
-    rendered = ocr.build_markdown_text_from_xml(
-        str(page_result.get('page_xml', '')),
-        table_markdowns=table_fragments,
+
+def build_output_result_html(document_name, pages):
+    from uuid import uuid4
+
+    markdown_pages = []
+    table_snippets = {}
+    for page_result, page_tables in pages:
+        fragments = (
+            TABLE_STRUCTURE_FEATURE.markdown_fragments(page_tables)
+            if TABLE_STRUCTURE_FEATURE is not None
+            else []
+        )
+        for fragment, item in zip(fragments, page_tables or []):
+            if item.get('html') and not item.get('error'):
+                token = 'NDLOCRTABLE' + uuid4().hex
+                table_snippets[token] = str(item['html'])
+                fragment['markdown'] = token
+        markdown_pages.append(_build_result_markdown(page_result, fragments))
+    return build_html_document(document_name, markdown_pages, table_snippets)
+
+
+async def open_preview_link(event):
+    import webbrowser
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    url = str(event.data)
+    parsed = urlparse(url)
+    if parsed.scheme == 'file' and sys.platform == 'win32':
+        path = ('//' + parsed.netloc if parsed.netloc else '') + parsed.path
+        await asyncio.to_thread(os.startfile, url2pathname(path))
+    elif not await asyncio.to_thread(webbrowser.open, url):
+        raise OSError(f'Unable to open preview link: {url}')
+
+
+def build_preview_markdown_style():
+    """Return a compact style shared by every formatted OCR preview."""
+    return ft.MarkdownStyleSheet(
+        p_text_style=ft.TextStyle(size=13),
+        code_text_style=ft.TextStyle(size=12),
+        h1_text_style=ft.TextStyle(size=22, weight=ft.FontWeight.BOLD),
+        h2_text_style=ft.TextStyle(size=20, weight=ft.FontWeight.BOLD),
+        h3_text_style=ft.TextStyle(size=18, weight=ft.FontWeight.BOLD),
+        h4_text_style=ft.TextStyle(size=16, weight=ft.FontWeight.W_600),
+        h5_text_style=ft.TextStyle(size=14, weight=ft.FontWeight.W_600),
+        h6_text_style=ft.TextStyle(size=13, weight=ft.FontWeight.W_600),
+        blockquote_text_style=ft.TextStyle(size=13),
+        list_bullet_text_style=ft.TextStyle(size=13),
+        table_head_text_style=ft.TextStyle(size=12, weight=ft.FontWeight.W_600),
+        table_body_text_style=ft.TextStyle(size=12),
+        block_spacing=8,
     )
-    if rendered:
-        return rendered
-    return str(page_result.get('markdown_text') or page_result.get('text') or '')
+
+
+def resolve_main_shortcut(key, *, ctrl=False, meta=False, shift=False, alt=False):
+    """Return the main-screen action assigned to a keyboard event."""
+    normalized_key = str(key or '').strip().lower().replace(' ', '')
+    primary = bool(ctrl or meta)
+
+    if normalized_key in ('escape', 'esc') and not any((primary, shift, alt)):
+        return 'stop_ocr'
+
+    if primary:
+        if normalized_key == 'o':
+            if shift and not alt:
+                return 'select_input_directory'
+            if alt and not shift:
+                return 'select_output_directory'
+            if not shift and not alt:
+                return 'select_input_file'
+        if normalized_key in ('enter', 'return', 'numpadenter') and not alt:
+            return 'crop_ocr' if shift else 'run_ocr'
+        if normalized_key in (',', 'comma') and not shift and not alt:
+            return 'customize_output'
+        return None
+
+    if alt and not shift:
+        return {
+            'c': 'capture_ocr',
+            'p': 'preview_previous',
+            'n': 'preview_next',
+            'm': 'toggle_markdown',
+        }.get(normalized_key)
+
+    return None
+
+
+def page_has_open_dialog(page):
+    """Return whether either the test page or Flet Page has an active dialog."""
+    dialog_stack = getattr(page, 'dialogs', None)
+    if dialog_stack is not None:
+        return bool(dialog_stack)
+    dialog_registry = getattr(page, '_dialogs', None)
+    return bool(getattr(dialog_registry, 'controls', None))
+
+
+def get_character_inclusion_transform(config_obj):
+    if config_obj.get('character_inclusion', False):
+        return apply_character_inclusion
+    return None
 
 
 ASSETS_DIR = APP_DIR / 'assets'
@@ -206,10 +326,11 @@ def process_cascade(alllineobj: RecogLine, recognizer30, recognizer50, recognize
     return [t.pred_str for t in targetdflistall]
 
 
-def load_ocr_models(args, *, download_models=False):
+def load_ocr_models(args, download_models=False):
     """Create the four independent ONNX sessions concurrently."""
     if download_models:
         from model_download import resolve_model_paths
+
         resolve_model_paths(args, SOURCE_DIR / 'model')
     load_runtime_modules()
     if hasattr(ocr, '_load_charlist'):
@@ -225,6 +346,16 @@ def load_ocr_models(args, *, download_models=False):
             recognizer30_future.result(),
             recognizer50_future.result(),
         )
+
+
+def load_table_recognizer(args, download_models=False):
+    if download_models and args.table_weights is None:
+        from model_download import get_model_path, TABLE_MODEL
+
+        args.table_weights = str(get_model_path(*TABLE_MODEL, SOURCE_DIR / 'model'))
+    recognizer = TABLE_STRUCTURE_FEATURE.create_recognizer(args)
+    recognizer.load()
+    return recognizer
 
 
 def load_rgb_image_array(input_path: str) -> 'np.ndarray':
@@ -331,6 +462,8 @@ class ImageSelector:
             value='',
             selectable=True,
             extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            on_tap_link=open_preview_link,
+            md_style_sheet=build_preview_markdown_style(),
             soft_line_break=True,
             visible=bool(self.config_obj.get('result_markdown_display', False)),
         )
@@ -515,6 +648,7 @@ class ImageSelector:
                 img=npimg,
                 outputpath=self.outputdirpath or os.getcwd(),
                 save_viz=False,
+                text_transform=get_character_inclusion_transform(self.config_obj),
             )
             page_tables = []
             if (
@@ -529,19 +663,23 @@ class ImageSelector:
                     self.table_recognizer,
                 )
             alltextlist = [page_result['text']]
+            output_dir = self.outputdirpath or os.getcwd()
+            output_stem = os.path.splitext(os.path.basename(inputname))[0]
+            if page_tables:
+                self.table_feature.write_html_files(
+                    inputname, page_tables, output_dir, output_stem,
+                )
             display_markdown = build_gui_result_markdown(page_result, page_tables)
             if page_result['line_count'] == 0 or (
                 page_result['line_count'] > 0 and page_result['vertical_line_count'] / page_result['line_count'] > 0.5
             ):
                 alltextlist = alltextlist[::-1]
             os.makedirs(self.outputdirpath or os.getcwd(), exist_ok=True)
-            if page_tables:
-                tables_path = os.path.join(
-                    self.outputdirpath or os.getcwd(),
-                    os.path.splitext(os.path.basename(inputname))[0] + '_tables.html',
+            if self.config_obj.get('html', False):
+                Path(output_dir, output_stem + '.html').write_text(
+                    build_output_result_html(inputname, [(page_result, page_tables)]),
+                    encoding='utf-8',
                 )
-                with open(tables_path, 'w', encoding='utf-8') as wf:
-                    wf.write(self.table_feature.build_html(inputname, page_tables))
             with open(os.path.join(self.outputdirpath or os.getcwd(), os.path.splitext(os.path.basename(inputname))[0] + '.txt'), 'w', encoding='utf-8') as wtf:
                 wtf.write('\n'.join(alltextlist))
             self.result_plain_text.value = page_result['text']
@@ -653,6 +791,8 @@ class CaptureTool:
             value='',
             selectable=True,
             extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            on_tap_link=open_preview_link,
+            md_style_sheet=build_preview_markdown_style(),
             soft_line_break=True,
             visible=bool(self.config_obj.get('result_markdown_display', False)),
         )
@@ -787,7 +927,6 @@ class CaptureTool:
         self.page.window.opacity = 0
         self.page.update()
         time.sleep(0.2)
-
         if (x2 - x1) > 5 and (y2 - y1) > 5:
             try:
                 self.im_crop = ImageGrab.grab(bbox=(x1, y1, x2, y2)).convert('RGB')
@@ -835,7 +974,7 @@ class CaptureTool:
         self.page.update()
         try:
             allstart = time.time()
-            filename_base = 'captureimg'
+            filename_base = f'captureimg_{time.time_ns()}'
             npimg = np.array(self.im_crop)
 
             page_result = await asyncio.to_thread(
@@ -848,6 +987,7 @@ class CaptureTool:
                 img=npimg,
                 outputpath=self.outputdirpath,
                 save_viz=False,
+                text_transform=get_character_inclusion_transform(self.config_obj),
             )
             page_tables = []
             if (
@@ -863,6 +1003,16 @@ class CaptureTool:
                     self.table_recognizer,
                 )
 
+            if page_tables:
+                self.table_feature.write_html_files(
+                    filename_base, page_tables, self.outputdirpath, filename_base,
+                )
+            if self.config_obj.get('html', False):
+                Path(self.outputdirpath).mkdir(parents=True, exist_ok=True)
+                Path(self.outputdirpath, filename_base + '.html').write_text(
+                    build_output_result_html(filename_base, [(page_result, page_tables)]),
+                    encoding='utf-8',
+                )
             final_text = build_gui_result_markdown(page_result, page_tables)
             self.resultsmessage.value = '{:.2f} sec'.format(time.time() - allstart)
             self.result_plain_text.value = page_result['text']
@@ -896,30 +1046,37 @@ class CaptureTool:
             self.page.pop_dialog()
         self.page.show_dialog(self.dialog)
 
-def parse_gui_args(argv=None, *, download_models=False):
+def parse_gui_args(argv=None, download_models=False):
     parser = argparse.ArgumentParser(description='Argument for Inference using ONNXRuntime')
-    parser.add_argument('--det-weights', type=str, required=False, help='Path to rtmdet onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'deim-s-1024x1024.onnx'))
+    parser.add_argument('--det-weights', type=str, required=False, help='Path to rtmdet onnx file', default=str(SOURCE_DIR / 'model' / 'deim-s-1024x1024-261124.onnx'))
     parser.add_argument('--det-classes', type=str, required=False, help='Path to list of class in yaml file', default=str(SOURCE_DIR / 'config' / 'ndl.yaml'))
     parser.add_argument('--det-score-threshold', type=float, required=False, default=0.2)
-    parser.add_argument('--det-conf-threshold', type=float, required=False, default=0.25)
+    parser.add_argument('--det-conf-threshold', type=float, required=False, default=0.2)
     parser.add_argument('--det-iou-threshold', type=float, required=False, default=0.2)
-    parser.add_argument('--rec-weights30', type=str, required=False, help='Path to parseq-tiny onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx'))
-    parser.add_argument('--rec-weights50', type=str, required=False, help='Path to parseq-tiny onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx'))
-    parser.add_argument('--rec-weights', type=str, required=False, help='Path to parseq-tiny onnx file', default=None if download_models else str(SOURCE_DIR / 'model' / 'parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx'))
+    parser.add_argument('--det-overlap-threshold', type=float, default=0.7,
+                        help='Remove smaller same-label regions covered by this fraction (0 to disable, otherwise >0 and <=1)')
+    parser.add_argument('--rec-weights30', type=str, required=False, help='Path to parseq-tiny onnx file', default=str(SOURCE_DIR / 'model' / 'parseq-ndl-24x256-30-tiny-499epoch-261124.onnx'))
+    parser.add_argument('--rec-weights50', type=str, required=False, help='Path to parseq-tiny onnx file', default=str(SOURCE_DIR / 'model' / 'parseq-ndl-24x384-50-tiny-278epoch-261124.onnx'))
+    parser.add_argument('--rec-weights', type=str, required=False, help='Path to parseq-tiny onnx file', default=str(SOURCE_DIR / 'model' / 'parseq-ndl-24x768-100-tiny-153epoch-261124.onnx'))
     parser.add_argument('--rec-classes', type=str, required=False, help='Path to list of class in yaml file', default=str(SOURCE_DIR / 'config' / 'NDLmoji.yaml'))
     parser.add_argument('--device', type=str, required=False, help='Device use (cpu or cuda)', choices=['cpu', 'cuda'], default='cpu')
     if TABLE_STRUCTURE_FEATURE is not None:
         TABLE_STRUCTURE_FEATURE.add_arguments(parser, SOURCE_DIR)
     if download_models:
+        from model_download import MODELS
+
+        parser.set_defaults(**{option: None for option in MODELS})
+        if TABLE_STRUCTURE_FEATURE is not None:
+            parser.set_defaults(table_weights=None)
         return parser.parse_args(argv)
-    # Flet may append its own process arguments to the desktop entry point.
+    # Standalone Flet builds may append their own host arguments.
     args, _ = parser.parse_known_args(argv)
     return args
 
 
-def main(page: ft.Page, *, args=None, download_models=False):
+def main(page: ft.Page, args=None, download_models=False):
     if args is None:
-        args = parse_gui_args()
+        args = parse_gui_args(download_models=download_models)
     page.title = 'NDLOCR-Lite-GUI v{}'.format(__version__)
     page.theme_mode = ft.ThemeMode.SYSTEM
     page.window.icon = str(ASSETS_DIR / 'icon.png')
@@ -972,6 +1129,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
     model_state = {'loading': False, 'error': None, 'table_error': None, 'elapsed': None}
 
     def renderui():
+        page.on_keyboard_event = None
         page.clean()
         page.overlay.clear()
         page.services.clear()
@@ -982,6 +1140,44 @@ def main(page: ft.Page, *, args=None, download_models=False):
         outputplaintextlist = []
         ocr_cancel_event=threading.Event()
         pdf_job_list = []
+        datapool_batch_extension = None
+        main_interaction_sections = []
+        model_loading_handlers = []
+
+        def build_main_semantics_section(label, content, key):
+            return ft.Semantics(
+                content=content,
+                label=label,
+                container=True,
+                header=True,
+                heading_level=2,
+                key=key,
+            )
+
+        def set_model_loading_lock(locked: bool):
+            for section in main_interaction_sections:
+                section.disabled = locked
+            for control, event_name, handler in model_loading_handlers:
+                setattr(control, event_name, None if locked else handler)
+
+        def register_model_loading_handlers():
+            seen = set()
+            stack = list(main_interaction_sections)
+            while stack:
+                control = stack.pop()
+                if id(control) in seen:
+                    continue
+                seen.add(id(control))
+                for event_name in ('on_click', 'on_change', 'on_tap'):
+                    handler = getattr(control, event_name, None)
+                    if handler is not None:
+                        model_loading_handlers.append((control, event_name, handler))
+                children = getattr(control, 'controls', None)
+                if children:
+                    stack.extend(children)
+                content = getattr(control, 'content', None)
+                if isinstance(content, ft.Control):
+                    stack.append(content)
 
         def create_pdf_func(outputpath: str, img: object, bboxlistobj: list, viztxtflag: bool, resolution: int = 300):
             from reportlab.pdfgen import canvas
@@ -1105,6 +1301,8 @@ def main(page: ft.Page, *, args=None, download_models=False):
             stop_ocr_btn.disabled=not (flag and allow_ocr_cancel)
             if chkbx_table_structure is not None:
                 chkbx_table_structure.disabled = flag or origin_table_recognizer is None
+            if datapool_batch_extension is not None:
+                datapool_batch_extension.set_external_busy(flag)
 
         async def process_pdf_with_original_layer(pdf_path: str, outputpath: str, alljsonobjlist: list, pdf_outpath_list: list, allsum: int):
             pdf_path_obj = Path(pdf_path)
@@ -1118,8 +1316,8 @@ def main(page: ft.Page, *, args=None, download_models=False):
             page_infos = []
             all_text_pages = []
             all_markdown_pages = []
+            html_pages = []
             all_page_xml = []
-            all_table_results = []
             tei_jsonobjlist = []
 
             try:
@@ -1132,7 +1330,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     if ocr_cancel_event.is_set():
                         return page_index, False, tei_jsonobjlist
                     page_name = f'{output_stem}_{page_index + 1:05}.png'
-                    progressmessage.value = f'{pdf_path_obj.name} page {page_index + 1}/{page_count}'
+                    set_progress_message(f'{pdf_path_obj.name} page {page_index + 1}/{page_count}')
                     progressmessage.update()
 
                     img = await asyncio.to_thread(
@@ -1152,6 +1350,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                         img=img,
                         outputpath=outputpath,
                         save_viz=False,
+                        text_transform=get_character_inclusion_transform(config_obj),
                     )
 
                     page_tables = []
@@ -1170,7 +1369,9 @@ def main(page: ft.Page, *, args=None, download_models=False):
                         )
                         for table_item in page_tables:
                             table_item['page_index'] = page_index
-                        all_table_results.extend(page_tables)
+                        TABLE_STRUCTURE_FEATURE.write_html_files(
+                            pdf_path_obj.name, page_tables, outputpath, output_stem,
+                        )
 
                     page_results.append(page_result)
                     all_json_contents.append(page_result['json_lines'])
@@ -1182,7 +1383,14 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     })
                     all_text_pages.append(page_result['text'])
                     page_markdown = build_gui_result_markdown(page_result, page_tables)
-                    all_markdown_pages.append(page_markdown)
+                    output_markdown = build_output_result_markdown(page_result, page_tables)
+                    all_markdown_pages.append(output_markdown)
+                    html_pages.append((page_result, page_tables))
+                    if chkbx_html.value and separate_page_outputs:
+                        Path(outputpath, f'{output_stem}_{page_index + 1:05}.html').write_text(
+                            build_output_result_html(page_name, [(page_result, page_tables)]),
+                            encoding='utf-8',
+                        )
                     outputplaintextlist.append(page_result['text'])
                     outputtxtlist.append(page_markdown)
                     all_page_xml.append(page_result['page_xml'])
@@ -1199,6 +1407,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                         write_tei=separate_page_outputs and chkbx_tei.value,
                         convert_tei_func=convert_tei if chkbx_tei.value else None,
                         include_xml_in_json=True,
+                        source_dpi=render_dpi,
                     )
                     alljsonobjlist.append(page_json_obj)
                     if not separate_page_outputs:
@@ -1234,6 +1443,10 @@ def main(page: ft.Page, *, args=None, download_models=False):
             if chkbx_markdown.value:
                 with open(os.path.join(outputpath, output_stem + '.md'), 'w', encoding='utf-8') as wf:
                     wf.write('\n\n---\n\n'.join(all_markdown_pages))
+            if chkbx_html.value and not separate_page_outputs:
+                Path(outputpath, output_stem + '.html').write_text(
+                    build_output_result_html(pdf_path_obj.name, html_pages), encoding='utf-8',
+                )
 
             pdf_json_obj = {
                 'contents': all_json_contents,
@@ -1249,15 +1462,6 @@ def main(page: ft.Page, *, args=None, download_models=False):
             if chkbx_json.value and not separate_page_outputs:
                 with open(os.path.join(outputpath, output_stem + '.json'), 'w', encoding='utf-8') as wf:
                     wf.write(json.dumps(pdf_json_obj, ensure_ascii=False, indent=2))
-
-            if all_table_results:
-                tables_html_path = os.path.join(outputpath, output_stem + '_tables.html')
-                tables_html = TABLE_STRUCTURE_FEATURE.build_html(
-                    pdf_path_obj.name,
-                    all_table_results,
-                )
-                with open(tables_html_path, 'w', encoding='utf-8') as wf:
-                    wf.write(tables_html)
 
             if chkbx_pdf.value:
                 output_pdf = os.path.join(outputpath, output_stem + '_text.pdf')
@@ -1276,7 +1480,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                 return
             ocr_cancel_event.set()
             stop_ocr_btn.disabled=True
-            progressmessage.value=TRANSLATIONS["main_ocr_cancel_requested"][config_obj["langcode"]]
+            set_progress_message(TRANSLATIONS["main_ocr_cancel_requested"][config_obj["langcode"]])
             page.update()
 
         async def ocr_button_result(e):
@@ -1288,14 +1492,14 @@ def main(page: ft.Page, *, args=None, download_models=False):
             nonlocal origin_detector
 
             if not outputpath:
-                progressmessage.value = 'Output directory is not selected.'
+                set_progress_message('Output directory is not selected.')
                 progressmessage.update()
                 return
 
             preview_index = 0
             parts_control(True,allow_ocr_cancel=True)
             page.update()
-            progressmessage.value = 'Start'
+            set_progress_message('Start')
             progressmessage.update()
 
             try:
@@ -1322,7 +1526,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                         allsum += 1
 
                 if allsum == 0:
-                    progressmessage.value = 'Images are not found.'
+                    set_progress_message('Images are not found.')
                     progressmessage.update()
                     return
 
@@ -1344,7 +1548,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     if ocr_cancel_event.is_set():
                         cancelled=True
                         break
-                    progressmessage.value = inputpath
+                    set_progress_message(inputpath)
                     progressmessage.update()
                     img = await asyncio.to_thread(load_rgb_image_array, inputpath)
                     start = time.time()
@@ -1361,6 +1565,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                         img=img,
                         outputpath=outputpath,
                         save_viz=False,
+                        text_transform=get_character_inclusion_transform(config_obj),
                     )
 
                     page_tables = []
@@ -1381,6 +1586,11 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     allxmlstr = '<OCRDATASET>\n' + page_result['page_xml'] + '\n</OCRDATASET>'
                     alltextlist = [page_result['text']]
                     resjsonarray = page_result['json_lines']
+                    output_stem = os.path.splitext(os.path.basename(inputpath))[0]
+                    if page_tables:
+                        TABLE_STRUCTURE_FEATURE.write_html_files(
+                            imgname, page_tables, outputpath, output_stem,
+                        )
                     page_markdown = build_gui_result_markdown(page_result, page_tables)
                     outputplaintextlist.append(page_result['text'])
                     outputtxtlist.append(page_markdown)
@@ -1397,16 +1607,6 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     }
                     alljsonobjlist.append(alljsonobj)
                     tei_jsonobjlist.append(alljsonobj)
-
-                    output_stem = os.path.splitext(os.path.basename(inputpath))[0]
-                    if page_tables:
-                        tables_html_path = os.path.join(outputpath, output_stem + '_tables.html')
-                        tables_html = TABLE_STRUCTURE_FEATURE.build_html(
-                            os.path.basename(inputpath),
-                            page_tables,
-                        )
-                        with open(tables_html_path, 'w', encoding='utf-8') as wf:
-                            wf.write(tables_html)
 
                     if chkbx_xml.value:
                         with open(os.path.join(outputpath, output_stem + '.xml'), 'w', encoding='utf-8') as wf:
@@ -1435,7 +1635,12 @@ def main(page: ft.Page, *, args=None, download_models=False):
 
                     if chkbx_markdown.value:
                         with open(os.path.join(outputpath, output_stem + '.md'), 'w', encoding='utf-8') as wf:
-                            wf.write(page_markdown)
+                            wf.write(build_output_result_markdown(page_result, page_tables))
+                    if chkbx_html.value:
+                        Path(outputpath, output_stem + '.html').write_text(
+                            build_output_result_html(imgname, [(page_result, page_tables)]),
+                            encoding='utf-8',
+                        )
 
                     if chkbx_pdf.value:
                         pdf_outpath = os.path.join(outputpath, output_stem + '.pdf')
@@ -1463,18 +1668,21 @@ def main(page: ft.Page, *, args=None, download_models=False):
                         preview_image.src = inputpathlist[min(preview_index, len(inputpathlist) - 1)]
                     if inputpathlist:
                         current_visualizeimgname.value = os.path.basename(inputpathlist[min(preview_index, len(inputpathlist) - 1)])
+                        preview_name_semantics.value = current_visualizeimgname.value
                     preview_image.update()
                     page.update()
                     if cancelled:
                         break
                 if cancelled:
-                    progressmessage.value=TRANSLATIONS["main_ocr_cancelled"][config_obj["langcode"]].format(
-                        completed=completed_count,total=allsum,elapsed=time.time()-allstart
+                    set_progress_message(
+                        TRANSLATIONS["main_ocr_cancelled"][config_obj["langcode"]].format(
+                            completed=completed_count,total=allsum,elapsed=time.time()-allstart
+                        )
                     )
                 elif config_obj['langcode'] == 'ja':
-                    progressmessage.value = '{} 件OCR完了 / 所要時間 {:.2f} 秒'.format(allsum, time.time() - allstart)
+                    set_progress_message('{} 件OCR完了 / 所要時間 {:.2f} 秒'.format(allsum, time.time() - allstart))
                 else:
-                    progressmessage.value = '{} items completed / Total time {:.2f} sec'.format(allsum, time.time() - allstart)
+                    set_progress_message('{} items completed / Total time {:.2f} sec'.format(allsum, time.time() - allstart))
                 progressmessage.update()
 
                 if chkbx_tei.value and len(tei_jsonobjlist)>0:
@@ -1497,7 +1705,9 @@ def main(page: ft.Page, *, args=None, download_models=False):
                         make_zip=True,
                     )
                     daisy_path = text_daisy_result.zip_path or text_daisy_result.directory
-                    progressmessage.value += f' / Text DAISY: {os.path.basename(daisy_path)}'
+                    set_progress_message(
+                        f'{progressmessage.value} / Text DAISY: {os.path.basename(daisy_path)}'
+                    )
 
                 if chkbx_pdf.value and chkbx_pdf_merge.value and len(pdf_outpath_list) > 1:
                     from pypdf import PdfReader, PdfWriter
@@ -1527,16 +1737,18 @@ def main(page: ft.Page, *, args=None, download_models=False):
                 if len(visualizepathlist) > 0:
                     preview_image.src = visualizepathlist[0]
                     current_visualizeimgname.value = os.path.basename(visualizepathlist[0])
+                    preview_name_semantics.value = current_visualizeimgname.value
                 elif inputpathlist:
                     preview_image.src = inputpathlist[0]
                     current_visualizeimgname.value = os.path.basename(inputpathlist[0])
+                    preview_name_semantics.value = current_visualizeimgname.value
                 preview_image.update()
                 preview_plain_text.update()
                 preview_text.update()
 
             except Exception as e:
                 print(e)
-                progressmessage.value = str(e)
+                set_progress_message(str(e))
                 progressmessage.update()
             finally:
                 ocr_cancel_event.clear()
@@ -1548,6 +1760,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
             if files and files[0].path:
                 selected_file_path = files[0].path
                 selected_input_path.value = selected_file_path
+                input_value_semantics.value = selected_file_path
                 nonlocal inputpathlist, outputtxtlist, pdf_job_list
                 inputpathlist.clear()
                 outputtxtlist.clear()
@@ -1558,9 +1771,9 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     pdf_job_list.append(selected_file_path)
                     filestem = os.path.basename(selected_file_path)[:-4]
                     if config_obj['langcode'] == 'ja':
-                        progressmessage.value = 'pdfファイルの前処理中…… {} '.format(selected_file_path)
+                        set_progress_message('pdfファイルの前処理中…… {} '.format(selected_file_path))
                     else:
-                        progressmessage.value = 'preprocessing pdf…… {} '.format(selected_file_path)
+                        set_progress_message('preprocessing pdf…… {} '.format(selected_file_path))
                     parts_control(True)
                     page.update()
                     for p in glob.glob(os.path.join(PDFTMPPATH, '*.jpg')):
@@ -1569,9 +1782,9 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     os.makedirs(PDFTMPPATH, exist_ok=True)
                     await asyncio.to_thread(render_pdf_preview, selected_file_path, filestem)
                     if config_obj['langcode'] == 'ja':
-                        progressmessage.value = 'pdfファイルの前処理完了'
+                        set_progress_message('pdfファイルの前処理完了')
                     else:
-                        progressmessage.value = 'Preprocessing of pdf complete'
+                        set_progress_message('Preprocessing of pdf complete')
                     parts_control(False)
                     page.update()
                 else:
@@ -1586,6 +1799,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
             selected_directory = await file_picker.get_directory_path()
             if selected_directory:
                 selected_input_path.value = selected_directory
+                input_value_semantics.value = selected_directory
                 nonlocal inputpathlist, outputtxtlist, pdf_job_list
                 inputpathlist.clear()
                 outputtxtlist.clear()
@@ -1636,9 +1850,9 @@ def main(page: ft.Page, *, args=None, download_models=False):
                             filestem = os.path.splitext(filename)[0]
 
                         if config_obj['langcode'] == 'ja':
-                            progressmessage.value = 'pdfファイルの前処理中…… {} '.format(inputpath)
+                            set_progress_message('pdfファイルの前処理中…… {} '.format(inputpath))
                         else:
-                            progressmessage.value = 'preprocessing pdf…… {} '.format(inputpath)
+                            set_progress_message('preprocessing pdf…… {} '.format(inputpath))
                         page.update()
 
                         try:
@@ -1647,9 +1861,9 @@ def main(page: ft.Page, *, args=None, download_models=False):
                             print(f'Error processing {inputpath}: {err}')
 
                 if config_obj['langcode'] == 'ja':
-                    progressmessage.value = '処理完了'
+                    set_progress_message('処理完了')
                 else:
-                    progressmessage.value = 'Processing complete'
+                    set_progress_message('Processing complete')
 
                 selector.set_image(inputpathlist)
 
@@ -1664,6 +1878,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
             selected_directory = await file_picker.get_directory_path()
             if selected_directory:
                 selected_output_path.value = selected_directory
+                output_value_semantics.value = selected_directory
                 selected_output_path.update()
                 config_obj['selected_output_path'] = selected_directory
                 save_config()
@@ -1687,9 +1902,11 @@ def main(page: ft.Page, *, args=None, download_models=False):
             if len(visualizepathlist) > 0:
                 preview_image.src = visualizepathlist[min(preview_index, len(visualizepathlist) - 1)]
                 current_visualizeimgname.value = os.path.basename(preview_image.src)
+                preview_name_semantics.value = current_visualizeimgname.value
             elif 0 <= preview_index < len(inputpathlist):
                 preview_image.src = inputpathlist[preview_index]
                 current_visualizeimgname.value = os.path.basename(inputpathlist[preview_index])
+                preview_name_semantics.value = current_visualizeimgname.value
             if 0 <= preview_index < len(outputtxtlist):
                 preview_plain_text.value = outputplaintextlist[preview_index] if preview_index < len(outputplaintextlist) else ''
                 preview_text.value = outputtxtlist[preview_index]
@@ -1710,9 +1927,11 @@ def main(page: ft.Page, *, args=None, download_models=False):
             if len(visualizepathlist) > 0:
                 preview_image.src = visualizepathlist[min(preview_index, len(visualizepathlist) - 1)]
                 current_visualizeimgname.value = os.path.basename(preview_image.src)
+                preview_name_semantics.value = current_visualizeimgname.value
             elif 0 <= preview_index < len(inputpathlist):
                 preview_image.src = inputpathlist[preview_index]
                 current_visualizeimgname.value = os.path.basename(inputpathlist[preview_index])
+                preview_name_semantics.value = current_visualizeimgname.value
             if 0 <= preview_index < len(outputtxtlist):
                 preview_plain_text.value = outputplaintextlist[preview_index] if preview_index < len(outputplaintextlist) else ''
                 preview_text.value = outputtxtlist[preview_index]
@@ -1739,6 +1958,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                 'json': chkbx_json.value,
                 'txt': chkbx_txt.value,
                 'markdown': chkbx_markdown.value,
+                'html': chkbx_html.value,
                 'xml': chkbx_xml.value,
                 'tei': chkbx_tei.value,
                 'pdf': chkbx_pdf.value,
@@ -1747,6 +1967,7 @@ def main(page: ft.Page, *, args=None, download_models=False):
                 'pdf_page_output': chkbx_pdf_page_output.value,
                 'pdf_resolution': int(pdf_resolution_textfield.value),
                 'text_daisy': chkbx_text_daisy.value,
+                'character_inclusion': chkbx_character_inclusion.value,
             }
             if chkbx_table_structure is not None:
                 updated_config['table_structure'] = chkbx_table_structure.value
@@ -1762,16 +1983,62 @@ def main(page: ft.Page, *, args=None, download_models=False):
             chkbx_pdf_merge.update()
             pdf_resolution_textfield.disabled = not chkbx_pdf.value
             pdf_resolution_textfield.update()
+            pdf_options_panel.opacity = 1.0 if chkbx_pdf.value else 0.55
+            pdf_options_panel.update()
 
-        def change_visualizestatus(e):
-            config_obj['visualize'] = chkbx_visualize.value
-            save_config()
+        def build_settings_section(title, description, icon, controls, key):
+            return ft.Container(
+                key=key,
+                padding=12,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                border_radius=10,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Icon(icon, color=ft.Colors.PRIMARY, size=22),
+                                ft.Column(
+                                    controls=[
+                                        ft.Text(
+                                            title,
+                                            theme_style=ft.TextThemeStyle.TITLE_MEDIUM,
+                                            weight=ft.FontWeight.W_600,
+                                        ),
+                                        ft.Text(
+                                            description,
+                                            theme_style=ft.TextThemeStyle.BODY_SMALL,
+                                            color=ft.Colors.ON_SURFACE_VARIANT,
+                                        ),
+                                    ],
+                                    spacing=1,
+                                    tight=True,
+                                    expand=True,
+                                ),
+                            ],
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        ft.Divider(height=1),
+                        *controls,
+                    ],
+                    spacing=6,
+                    tight=True,
+                ),
+            )
 
-        preview_image = ft.Image(src=DEFAULT_IMAGE_SRC, width=400, height=300, gapless_playback=True)
+        preview_image = ft.Image(
+            src=DEFAULT_IMAGE_SRC,
+            width=400,
+            height=300,
+            gapless_playback=True,
+            semantics_label=TRANSLATIONS['a11y_main_preview_image'][config_obj['langcode']],
+        )
         preview_text = ft.Markdown(
             value='',
             selectable=True,
             extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            on_tap_link=open_preview_link,
+            md_style_sheet=build_preview_markdown_style(),
             soft_line_break=True,
             visible=bool(config_obj.get('result_markdown_display', False)),
         )
@@ -1788,32 +2055,76 @@ def main(page: ft.Page, *, args=None, download_models=False):
 
         file_picker = ft.FilePicker()
         page.services.append(file_picker)
-        progressbar = ft.ProgressBar(width=200, value=0)
+        progressbar = ft.ProgressBar(
+            width=200,
+            value=0,
+            semantics_label=TRANSLATIONS['a11y_main_progress'][config_obj['langcode']],
+        )
         selected_input_path = ft.Text(selectable=True)
         selected_output_path = ft.Text(config_obj['selected_output_path'], selectable=True)
         current_visualizeimgname = ft.Text(selectable=True)
         progressmessage = ft.Text(width=400, selectable=True)
-        chkbx_visualize = ft.Checkbox(label=TRANSLATIONS['main_visualize_label'][config_obj['langcode']], value=config_obj.get('visualize', True), on_change=change_visualizestatus, key='visualize')
-        chkbx_json = ft.Checkbox(label='JSON形式', value=config_obj['json'], key='output_json')
-        chkbx_txt = ft.Checkbox(label='TXT形式', value=config_obj['txt'], key='output_txt')
-        chkbx_markdown = ft.Checkbox(label='Markdown形式（.md）', value=config_obj.get('markdown', False), key='output_markdown')
-        chkbx_xml = ft.Checkbox(label='XML形式', value=config_obj['xml'], key='output_xml')
-        chkbx_tei = ft.Checkbox(label='TEI形式', value=config_obj['tei'], key='output_tei')
+        progress_message_semantics = None
+
+        def set_progress_message(message):
+            progressmessage.value = message
+            if progress_message_semantics is not None:
+                progress_message_semantics.label = message
+
+        chkbx_visualize = ft.Checkbox(label=TRANSLATIONS['main_visualize_label'][config_obj['langcode']], value=True, key='visualize')
+        chkbx_json = ft.Checkbox(label='JSON', value=config_obj['json'], key='output_json')
+        chkbx_txt = ft.Checkbox(label='TXT', value=config_obj['txt'], key='output_txt')
+        chkbx_markdown = ft.Checkbox(label='Markdown（.md）', value=config_obj.get('markdown', False), key='output_markdown')
+        chkbx_html = ft.Checkbox(label='HTML（.html）', value=config_obj.get('html', False), key='output_html')
+        chkbx_xml = ft.Checkbox(label='XML', value=config_obj['xml'], key='output_xml')
+        chkbx_tei = ft.Checkbox(label='TEI', value=config_obj['tei'], key='output_tei')
         chkbx_pdf = ft.Checkbox(label='透明テキスト付PDF', value=config_obj['pdf'], on_change=change_pdfstatus, key='output_pdf')
         chkbx_pdf_viztxt = ft.Checkbox(label='PDFに青色で文字を重ねる', value=config_obj['pdf_viztxt'], disabled=not chkbx_pdf.value, key='output_pdf_visible_text')
         chkbx_pdf_merge = ft.Checkbox(label='出力ファイルを1つのpdfにまとめる', value=config_obj['pdf_merge'], disabled=not chkbx_pdf.value, key='output_pdf_merge')
-        chkbx_pdf_page_output = ft.Checkbox(label='複数ページPDFを入力とする時はTXT/JSON/XML/TEIをページ毎に出力する', value=config_obj.get('pdf_page_output', True), key='output_pdf_page_output')
-        pdf_resolution_textfield = ft.TextField(label='pdfの出力解像度を指定する', value=str(config_obj['pdf_resolution']), width=200, disabled=not chkbx_pdf.value, key='output_pdf_resolution')
+        chkbx_pdf_page_output = ft.Checkbox(label='複数ページPDFを入力とする時はTXT/JSON/XML/TEI/HTMLをページ毎に出力する', value=config_obj.get('pdf_page_output', True), key='output_pdf_page_output')
+        pdf_resolution_textfield = ft.TextField(
+            label='PDFの出力解像度',
+            value=str(config_obj['pdf_resolution']),
+            suffix='dpi',
+            keyboard_type=ft.KeyboardType.NUMBER,
+            width=210,
+            dense=True,
+            disabled=not chkbx_pdf.value,
+            key='output_pdf_resolution',
+        )
         chkbx_text_daisy = ft.Checkbox(
-            label='テキストDAISY形式（DAISY 3）',
+            label='テキストDAISY（DAISY 3）',
             value=config_obj['text_daisy'],
             key='output_text_daisy',
+        )
+        chkbx_character_inclusion = ft.Checkbox(
+            label=TRANSLATIONS['main_character_inclusion_label'][config_obj['langcode']],
+            value=config_obj.get('character_inclusion', False),
+            key='output_character_inclusion',
         )
         chkbx_table_structure = (
             TABLE_STRUCTURE_FEATURE.create_output_control(config_obj)
             if TABLE_STRUCTURE_FEATURE is not None
             else None
         )
+        for settings_checkbox in (
+            chkbx_json,
+            chkbx_txt,
+            chkbx_markdown,
+            chkbx_html,
+            chkbx_xml,
+            chkbx_tei,
+            chkbx_pdf,
+            chkbx_pdf_viztxt,
+            chkbx_pdf_merge,
+            chkbx_pdf_page_output,
+            chkbx_text_daisy,
+            chkbx_character_inclusion,
+            chkbx_table_structure,
+        ):
+            if settings_checkbox is not None:
+                settings_checkbox.visual_density = ft.VisualDensity.COMPACT
+                settings_checkbox.label_style = ft.TextStyle(size=13)
         file_upload_btn = ft.Button(
             TRANSLATIONS['main_file_upload_btn'][config_obj['langcode']],
             icon=ft.Icons.UPLOAD_FILE,
@@ -1860,8 +2171,8 @@ def main(page: ft.Page, *, args=None, download_models=False):
             content=preview_image_col,
         )
         preview_text_col = ft.Column(
-            #controls=[preview_view_switch, preview_plain_text, preview_text],
-            controls=[preview_plain_text, preview_text],
+            controls=[preview_view_switch, preview_plain_text, preview_text],
+            #controls=[preview_plain_text, preview_text],
             scroll=ft.ScrollMode.ALWAYS,
             height=300,
             expand=True,
@@ -1873,22 +2184,115 @@ def main(page: ft.Page, *, args=None, download_models=False):
             on_click=lambda e: page.show_dialog(customize_dlg_modal),
             key='customize_output',
         )
+        format_grid = ft.Row(
+            controls=[
+                ft.Container(chkbx_txt, width=100),
+                ft.Container(chkbx_json, width=100),
+                ft.Container(chkbx_markdown, width=150),
+                ft.Container(chkbx_html, width=150),
+                ft.Container(chkbx_xml, width=100),
+                ft.Container(chkbx_tei, width=100),
+            ],
+            spacing=4,
+            wrap=True,
+            run_spacing=0,
+            key='settings_format_row',
+        )
+        pdf_options_panel = ft.Container(
+            key='output_pdf_options',
+            margin=ft.Margin.only(left=8),
+            padding=ft.Padding.only(left=10, top=4, right=8, bottom=4),
+            border=ft.Border.only(left=ft.BorderSide(2, ft.Colors.OUTLINE_VARIANT)),
+            opacity=1.0 if chkbx_pdf.value else 0.55,
+            content=ft.Row(
+                controls=[
+                    ft.Container(chkbx_pdf_viztxt, expand=5),
+                    ft.Container(chkbx_pdf_merge, expand=7),
+                ],
+                spacing=4,
+                tight=True,
+            ),
+        )
+        output_formats_section = build_settings_section(
+            TRANSLATIONS['customize_formats_title'][config_obj['langcode']],
+            TRANSLATIONS['customize_formats_explain'][config_obj['langcode']],
+            ft.Icons.DESCRIPTION_OUTLINED,
+            [format_grid],
+            'settings_output_formats_section',
+        )
+        pdf_section = build_settings_section(
+            TRANSLATIONS['customize_pdf_title'][config_obj['langcode']],
+            TRANSLATIONS['customize_pdf_explain'][config_obj['langcode']],
+            ft.Icons.PICTURE_AS_PDF_OUTLINED,
+            [
+                ft.Row(
+                    controls=[
+                        ft.Container(chkbx_pdf, expand=True),
+                        pdf_resolution_textfield,
+                    ],
+                    spacing=8,
+                ),
+                pdf_options_panel,
+                ft.Divider(height=1),
+                chkbx_pdf_page_output,
+            ],
+            'settings_pdf_section',
+        )
+        additional_section = build_settings_section(
+            TRANSLATIONS['customize_additional_title'][config_obj['langcode']],
+            TRANSLATIONS['customize_additional_explain'][config_obj['langcode']],
+            ft.Icons.AUTO_FIX_HIGH_OUTLINED,
+            [
+                chkbx_text_daisy,
+                chkbx_character_inclusion,
+                *([chkbx_table_structure] if chkbx_table_structure is not None else []),
+            ],
+            'settings_additional_section',
+        )
         customize_dlg_modal = ft.AlertDialog(
             modal=True,
-            title=ft.Text(TRANSLATIONS['customize_dlg_modal_title'][config_obj['langcode']]),
-            content=ft.Text(TRANSLATIONS['customize_dlg_modal_explain'][config_obj['langcode']]),
+            title=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.TUNE, color=ft.Colors.PRIMARY),
+                    ft.Text(TRANSLATIONS['customize_dlg_modal_title'][config_obj['langcode']]),
+                ],
+                spacing=10,
+            ),
+            content=ft.Column(
+                controls=[
+                    ft.Text(
+                        TRANSLATIONS['customize_dlg_modal_explain'][config_obj['langcode']],
+                        color=ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                    output_formats_section,
+                    ft.ResponsiveRow(
+                        controls=[
+                            ft.Container(pdf_section, col={'sm': 12, 'md': 8}),
+                            ft.Container(additional_section, col={'sm': 12, 'md': 4}),
+                        ],
+                        spacing=8,
+                        run_spacing=8,
+                        key='settings_detail_row',
+                    ),
+                ],
+                width=860,
+                height=360,
+                spacing=8,
+                scroll=ft.ScrollMode.AUTO,
+            ),
             actions=[
-                ft.Row([chkbx_txt,chkbx_json]),
-                #chkbx_markdown,
-                ft.Row([chkbx_xml, chkbx_tei]),
-                ft.Row([chkbx_pdf, chkbx_pdf_viztxt]),
-                ft.Row([chkbx_pdf_merge, pdf_resolution_textfield]),
-                chkbx_pdf_page_output,
-                #chkbx_text_daisy,
-                *([chkbx_table_structure] if chkbx_table_structure is not None else []),
-                ft.TextButton('OK', on_click=handle_customize_dlg_modal_close, key='customize_output_ok'),
+                ft.Button(
+                    TRANSLATIONS['customize_save'][config_obj['langcode']],
+                    icon=ft.Icons.CHECK,
+                    on_click=handle_customize_dlg_modal_close,
+                    key='customize_output_ok',
+                ),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
+            title_padding=ft.Padding.only(left=20, top=16, right=20, bottom=8),
+            content_padding=ft.Padding.only(left=20, top=0, right=20, bottom=4),
+            actions_padding=ft.Padding.only(left=20, top=4, right=20, bottom=12),
+            inset_padding=ft.Padding.symmetric(horizontal=28, vertical=16),
             key='customize_output_dialog',
         )
         selector = ImageSelector(
@@ -1931,12 +2335,49 @@ def main(page: ft.Page, *, args=None, download_models=False):
             if DATA_POOL_FEATURE is not None
             else None
         )
+
+        async def batch_ocr_image(image_path: str):
+            if not models_are_ready():
+                raise RuntimeError('OCRモデルの読み込みが完了していません')
+            img = await asyncio.to_thread(load_rgb_image_array, image_path)
+            page_result = await asyncio.to_thread(
+                ocr._run_ocr_on_image_array,
+                detector=origin_detector,
+                recognizer30=origin_recognizer30,
+                recognizer50=origin_recognizer50,
+                recognizer100=origin_recognizer,
+                inputname=os.path.basename(image_path),
+                img=img,
+                outputpath=PDFTMPPATH,
+                save_viz=False,
+                text_transform=get_character_inclusion_transform(config_obj),
+            )
+            return {
+                'text': page_result['text'],
+                'json_lines': page_result['json_lines'],
+            }
+
+        datapool_batch_extension = (
+            DATA_POOL_FEATURE.attach_case_batch(
+                page,
+                config_obj,
+                save_config,
+                LLM_FEATURE,
+                batch_ocr_image,
+                file_picker,
+                models_are_ready(),
+                parts_control,
+            )
+            if DATA_POOL_FEATURE is not None and LLM_FEATURE is not None
+            else None
+        )
         datapool_header_controls = (
             DATA_POOL_FEATURE.build_auth_controls(
                 page,
                 config_obj,
                 save_config,
                 datapool_capture_extension,
+                datapool_batch_extension,
             )
             if DATA_POOL_FEATURE is not None
             else []
@@ -1970,44 +2411,231 @@ def main(page: ft.Page, *, args=None, download_models=False):
             controls=[ft.Text('日本語'), ft.Text('English')],
             key='locale',
         )
-        page.add(
+        input_value_semantics = ft.Semantics(
+            # Keep a non-empty layout anchor while no path is selected so
+            # Flutter does not prune this status from the semantics tree.
+            content=ft.Row(
+                [selected_input_path, ft.Text('\u00a0')],
+                spacing=0,
+                tight=True,
+            ),
+            label=TRANSLATIONS['a11y_main_input_value'][config_obj['langcode']],
+            value=(
+                selected_input_path.value
+                or TRANSLATIONS['a11y_value_not_selected'][config_obj['langcode']]
+            ),
+            container=True,
+            live_region=True,
+            read_only=True,
+            focusable=True,
+            exclude_semantics=True,
+            key='a11y_input_value',
+        )
+        output_value_semantics = ft.Semantics(
+            content=selected_output_path,
+            label=TRANSLATIONS['a11y_main_output_value'][config_obj['langcode']],
+            value=(
+                selected_output_path.value
+                or TRANSLATIONS['a11y_value_not_selected'][config_obj['langcode']]
+            ),
+            container=True,
+            live_region=True,
+            read_only=True,
+            focusable=True,
+            key='a11y_output_value',
+        )
+        preview_name_semantics = ft.Semantics(
+            content=current_visualizeimgname,
+            label=TRANSLATIONS['a11y_main_preview_name'][config_obj['langcode']],
+            value=TRANSLATIONS['a11y_value_not_selected'][config_obj['langcode']],
+            container=True,
+            live_region=True,
+            read_only=True,
+            focusable=True,
+            key='a11y_preview_name',
+        )
+        progress_message_semantics = ft.Semantics(
+            content=progressmessage,
+            label=(
+                progressmessage.value
+                or TRANSLATIONS['a11y_main_status_group'][config_obj['langcode']]
+            ),
+            container=True,
+            live_region=True,
+            read_only=True,
+            exclude_semantics=True,
+            key='a11y_progress_message',
+        )
+        progress_status_semantics = ft.Semantics(
+            content=ft.Column([
+                progress_message_semantics,
+                progressbar,
+            ], width=400),
+            label=TRANSLATIONS['a11y_main_status_group'][config_obj['langcode']],
+            container=True,
+            live_region=True,
+            read_only=True,
+            key='a11y_progress_status',
+        )
+        app_settings_section = build_main_semantics_section(
+            TRANSLATIONS['a11y_main_settings_group'][config_obj['langcode']],
             ft.Row([
                 localebutton,
                 *datapool_header_controls,
             ]),
+            'a11y_app_settings_section',
+        )
+        quick_actions_section = build_main_semantics_section(
+            TRANSLATIONS['a11y_main_quick_group'][config_obj['langcode']],
             ft.Row([
                 explain_label,
                 cap_btn,
             ]),
-            ft.Divider(),
+            'a11y_quick_actions_section',
+        )
+        input_section = build_main_semantics_section(
+            TRANSLATIONS['a11y_main_input_group'][config_obj['langcode']],
             ft.Row([
                 file_upload_btn,
                 directory_upload_btn,
                 ft.Text(TRANSLATIONS['main_target_label'][config_obj['langcode']]),
-                selected_input_path,
+                input_value_semantics,
             ]),
-            ft.Divider(),
+            'a11y_input_section',
+        )
+        output_section = build_main_semantics_section(
+            TRANSLATIONS['a11y_main_output_group'][config_obj['langcode']],
             ft.Row([
                 directory_output_btn,
                 ft.Text(TRANSLATIONS['main_output_label'][config_obj['langcode']]),
-                selected_output_path,
+                output_value_semantics,
             ]),
-            ft.Divider(),
-            ft.Row([
-                ocr_btn,
-                stop_ocr_btn,
-                crop_btn,
-                ft.Column([
-                    chkbx_visualize,
-                    ft.Row([
-                        customize_btn,
-                        ft.Column([progressmessage, progressbar], width=400),
-                    ]),
+            'a11y_output_section',
+        )
+        run_controls_semantics = ft.Semantics(
+            content=ft.Row([ocr_btn, stop_ocr_btn, crop_btn]),
+            label=TRANSLATIONS['a11y_main_run_controls_group'][config_obj['langcode']],
+            container=True,
+            key='a11y_run_controls',
+        )
+        options_status_semantics = ft.Semantics(
+            content=ft.Column([
+                chkbx_visualize,
+                ft.Row([
+                    customize_btn,
+                    progress_status_semantics,
                 ]),
             ]),
+            label=TRANSLATIONS['a11y_main_options_status_group'][config_obj['langcode']],
+            container=True,
+            key='a11y_options_status',
+        )
+        execution_section = build_main_semantics_section(
+            TRANSLATIONS['a11y_main_execution_group'][config_obj['langcode']],
+            ft.Row([
+                run_controls_semantics,
+                options_status_semantics,
+            ]),
+            'a11y_execution_section',
+        )
+        preview_controls_semantics = ft.Semantics(
+            content=ft.Row([
+                ft.Text(TRANSLATIONS['main_preview_label'][config_obj['langcode']]),
+                preview_prev_btn,
+                preview_next_btn,
+                preview_name_semantics,
+            ]),
+            label=TRANSLATIONS['a11y_main_preview_controls_group'][config_obj['langcode']],
+            container=True,
+            key='a11y_preview_controls',
+        )
+        preview_content_semantics = ft.Semantics(
+            content=ft.Row([preview_image_int, preview_text_col]),
+            label=TRANSLATIONS['a11y_main_preview_content_group'][config_obj['langcode']],
+            container=True,
+            key='a11y_preview_content',
+        )
+        preview_section = build_main_semantics_section(
+            TRANSLATIONS['a11y_main_preview_group'][config_obj['langcode']],
+            ft.Column([
+                preview_controls_semantics,
+                preview_content_semantics,
+            ]),
+            'a11y_preview_section',
+        )
+        main_interaction_sections.extend([
+            app_settings_section,
+            quick_actions_section,
+            input_section,
+            output_section,
+            execution_section,
+            preview_section,
+        ])
+
+        async def invoke_control_event(control, event_name='on_click'):
+            if control.disabled:
+                return False
+            handler = getattr(control, event_name, None)
+            if handler is None:
+                return False
+            result = handler(None)
+            if inspect.isawaitable(result):
+                await result
+            return True
+
+        async def handle_main_keyboard_shortcut(e: ft.KeyboardEvent):
+            if model_state['loading'] or any(
+                section.disabled for section in main_interaction_sections
+            ):
+                return
+            if page_has_open_dialog(page):
+                return
+
+            action = resolve_main_shortcut(
+                e.key,
+                ctrl=e.ctrl,
+                meta=e.meta,
+                shift=e.shift,
+                alt=e.alt,
+            )
+            shortcut_targets = {
+                'select_input_file': file_upload_btn,
+                'select_input_directory': directory_upload_btn,
+                'select_output_directory': directory_output_btn,
+                'run_ocr': ocr_btn,
+                'crop_ocr': crop_btn,
+                'stop_ocr': stop_ocr_btn,
+                'customize_output': customize_btn,
+                'capture_ocr': cap_btn,
+                'preview_previous': preview_prev_btn,
+                'preview_next': preview_next_btn,
+            }
+            if action == 'toggle_markdown':
+                if preview_view_switch.disabled or preview_view_switch.on_change is None:
+                    return
+                preview_view_switch.value = not bool(preview_view_switch.value)
+                await invoke_control_event(preview_view_switch, 'on_change')
+                return
+            target = shortcut_targets.get(action)
+            if target is not None:
+                await invoke_control_event(target)
+
+        page.on_keyboard_event = handle_main_keyboard_shortcut
+        register_model_loading_handlers()
+        initial_model_lock = not models_are_ready()
+        set_model_loading_lock(initial_model_lock)
+        parts_control(initial_model_lock)
+        page.add(
+            app_settings_section,
+            quick_actions_section,
             ft.Divider(),
-            ft.Row([ft.Text(TRANSLATIONS['main_preview_label'][config_obj['langcode']]), preview_prev_btn, preview_next_btn, current_visualizeimgname]),
-            ft.Row([preview_image_int, preview_text_col]),
+            input_section,
+            ft.Divider(),
+            output_section,
+            ft.Divider(),
+            execution_section,
+            ft.Divider(),
+            preview_section,
         )
         page.update()
 
@@ -2023,14 +2651,16 @@ def main(page: ft.Page, *, args=None, download_models=False):
                     origin_recognizer,
                     origin_recognizer30,
                     origin_recognizer50,
-                ) = await asyncio.to_thread(load_ocr_models, args, download_models=download_models)
+                ) = await asyncio.to_thread(
+                    load_ocr_models, args, download_models=download_models
+                )
                 origin_table_recognizer = None
                 model_state['table_error'] = None
                 if TABLE_STRUCTURE_FEATURE is not None:
                     try:
-                        table_recognizer = TABLE_STRUCTURE_FEATURE.create_recognizer(args)
-                        await asyncio.to_thread(table_recognizer.load)
-                        origin_table_recognizer = table_recognizer
+                        origin_table_recognizer = await asyncio.to_thread(
+                            load_table_recognizer, args, download_models=download_models
+                        )
                     except Exception as table_ex:
                         model_state['table_error'] = table_ex
                         print(f'[WARN] Table structure initialization failed: {table_ex}')
@@ -2048,53 +2678,58 @@ def main(page: ft.Page, *, args=None, download_models=False):
                 progressbar.value = 0
                 if config_obj['langcode'] == 'ja':
                     if TABLE_STRUCTURE_FEATURE is None:
-                        progressmessage.value = f'OCRモデル準備完了 ({model_state["elapsed"]:.1f}秒)'
+                        set_progress_message(f'OCRモデル準備完了 ({model_state["elapsed"]:.1f}秒)')
                     elif model_state.get('table_error') is None:
-                        progressmessage.value = f'OCR / 表推定モデル準備完了 ({model_state["elapsed"]:.1f}秒)'
+                        set_progress_message(f'OCR / 表推定モデル準備完了 ({model_state["elapsed"]:.1f}秒)')
                     else:
-                        progressmessage.value = f'OCRモデル準備完了 / 表推定初期化失敗 ({model_state["elapsed"]:.1f}秒)'
+                        set_progress_message(f'OCRモデル準備完了 / 表推定初期化失敗 ({model_state["elapsed"]:.1f}秒)')
                 else:
                     if TABLE_STRUCTURE_FEATURE is None:
-                        progressmessage.value = f'OCR models ready ({model_state["elapsed"]:.1f} sec)'
+                        set_progress_message(f'OCR models ready ({model_state["elapsed"]:.1f} sec)')
                     elif model_state.get('table_error') is None:
-                        progressmessage.value = f'OCR / TableInfer models ready ({model_state["elapsed"]:.1f} sec)'
+                        set_progress_message(f'OCR / TableInfer models ready ({model_state["elapsed"]:.1f} sec)')
                     else:
-                        progressmessage.value = f'OCR models ready / TableInfer models unavailable ({model_state["elapsed"]:.1f} sec)'
+                        set_progress_message(f'OCR models ready / TableInfer models unavailable ({model_state["elapsed"]:.1f} sec)')
             except Exception as ex:
                 model_state['error'] = ex
                 progressbar.value = 0
-                progressmessage.value = f'OCR model initialization failed: {ex}'
+                set_progress_message(f'OCR model initialization failed: {ex}')
             finally:
                 model_state['loading'] = False
+                if datapool_batch_extension is not None:
+                    datapool_batch_extension.set_models_ready(models_are_ready())
+                set_model_loading_lock(False)
                 parts_control(False)
                 page.update()
 
         if models_are_ready():
+            set_model_loading_lock(False)
             parts_control(False)
             if model_state['elapsed'] is not None:
                 if config_obj['langcode'] == 'ja':
                     if TABLE_STRUCTURE_FEATURE is None:
-                        progressmessage.value = f'OCRモデル準備完了 ({model_state["elapsed"]:.1f}秒)'
+                        set_progress_message(f'OCRモデル準備完了 ({model_state["elapsed"]:.1f}秒)')
                     elif model_state.get('table_error') is None:
-                        progressmessage.value = f'OCR / 表推定モデル準備完了 ({model_state["elapsed"]:.1f}秒)'
+                        set_progress_message(f'OCR / 表推定モデル準備完了 ({model_state["elapsed"]:.1f}秒)')
                     else:
-                        progressmessage.value = f'OCRモデル準備完了 / 表推定初期化失敗 ({model_state["elapsed"]:.1f}秒)'
+                        set_progress_message(f'OCRモデル準備完了 / 表推定初期化失敗 ({model_state["elapsed"]:.1f}秒)')
                 else:
                     if TABLE_STRUCTURE_FEATURE is None:
-                        progressmessage.value = f'OCR models ready ({model_state["elapsed"]:.1f} sec)'
+                        set_progress_message(f'OCR models ready ({model_state["elapsed"]:.1f} sec)')
                     elif model_state.get('table_error') is None:
-                        progressmessage.value = f'OCR / TableInfer models ready ({model_state["elapsed"]:.1f} sec)'
+                        set_progress_message(f'OCR / TableInfer models ready ({model_state["elapsed"]:.1f} sec)')
                     else:
-                        progressmessage.value = f'OCR models ready / TableInfer models unavailable ({model_state["elapsed"]:.1f} sec)'
+                        set_progress_message(f'OCR models ready / TableInfer models unavailable ({model_state["elapsed"]:.1f} sec)')
             page.update()
         elif not model_state['loading']:
             model_state['loading'] = True
+            set_model_loading_lock(True)
+            parts_control(True)
             progressbar.value = None
             if config_obj['langcode'] == 'ja':
-                progressmessage.value = 'OCRモデルを読み込み中…'
+                set_progress_message('OCRモデルを読み込み中…')
             else:
-                progressmessage.value = 'Loading OCR models…'
-            localebutton.disabled = True
+                set_progress_message('Loading OCR models…')
             page.update()
             page.run_task(initialize_models)
 

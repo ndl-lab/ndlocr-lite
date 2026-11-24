@@ -32,7 +32,7 @@ def main() -> None:
             raise SystemExit(
                 "--dev requires a GUI release version in X.Y.Z format"
             )
-        version = f"{version}.dev0"
+        version = f"{version}.dev3"
 
     pyproject_path = pathlib.Path("pyproject.toml")
 

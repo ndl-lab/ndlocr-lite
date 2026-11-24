@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ndlocr-lite"
-version = "1.4.0"
+version = "2.0.0"
 description = "NDLOCR-Lite CLI Application"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,14 +17,14 @@ dependencies = { file = ["requirements.txt"] }
 ndlocr-lite = "cli:main"
 
 [tool.setuptools]
-py-modules = ["cli", "model_download", "ocr", "deim", "parseq", "ndl_parser", "tcy_wrapper","pdf_output_utils","version"]
+py-modules = ["cli", "model_download", "ocr", "deim", "parseq", "ndl_parser", "tcy_wrapper", "pdf_output_utils", "version", "character_inclusion", "html_output", "tablecenternet"]
 
 [tool.setuptools.package-dir]
 "" = "src"
 ndlocr_lite_gui = "ndlocr-lite-gui"
 
 [tool.setuptools.package-data]
-"config" = ["*.yaml"]
+"config" = ["*.yaml", "*.csv"]
 "ndlocr_lite_gui" = ["assets/*"]
 
 [tool.setuptools.exclude-package-data]
