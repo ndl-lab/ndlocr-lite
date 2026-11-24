@@ -83,7 +83,7 @@ uv tool install --prerelease allow ndlocr-lite
 
 pip/uvでインストールする配布物にはONNXモデルを含めません。`ndlocr-lite`の初回OCR実行時に、未指定のモデルを`https://lab.ndl.go.jp/dataset/ndlocr-lite/onnx/v2/`から取得し、SHA-256を検証してユーザーのキャッシュに保存します。初回はネット接続と約157 MBの空き容量が必要です。以降はキャッシュを再利用します。`--help`と`--version`ではダウンロードしません。
 
-キャッシュ先はWindowsでは`%LOCALAPPDATA%\ndlocr-lite\models\v2`、macOSでは`~/Library/Caches/ndlocr-lite/models/v2`、Linuxでは`${XDG_CACHE_HOME:-~/.cache}/ndlocr-lite/models/v2`です。各`--*-weights`オプションで指定したファイルはそのまま使用します。GUI版と`python ocr.py`は従来どおり同梱モデルを使用し、ダウンロードしません。
+キャッシュ先はWindowsでは`%LOCALAPPDATA%\ndlocr-lite\models\v2`、macOSでは`~/Library/Caches/ndlocr-lite/models/v2`、Linuxでは`${XDG_CACHE_HOME:-~/.cache}/ndlocr-lite/models/v2`です。各`--*-weights`オプションで指定したファイルはそのまま使用します。`ndlocr-lite gui`で起動するGUIも同じキャッシュを使用し、表構造推定モデル（約28 MB）も初回に取得します。配布済みのデスクトップGUI版と`python ocr.py`は従来どおり同梱モデルを使用し、ダウンロードしません。
 
 ### パラメータの説明
 
@@ -97,7 +97,7 @@ pip/uvでインストールする配布物にはONNXモデルを含めません�
 
 #### `--output`オプション
 
-OCR結果を保存する出力先ディレクトリを相対パスまたは絶対パスで指定する。
+OCR結果を保存する出力先ディレクトリを相対パスまたは絶対パスで指定する。存在しない場合は、親ディレクトリを含めて新規作成する。権限不足などで作成できない場合は、エラーを表示して終了する。
 
 #### `--viz`オプション
 
