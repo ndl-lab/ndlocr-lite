@@ -39,7 +39,7 @@ class TableStructureFeature:
             default=8,
             help=(
                 'Minimum pixel margin around layout-detected table crops '
-                '(an additional 2% proportional margin is applied)'
+                '(an additional 2%% proportional margin is applied)'
             ),
         )
 

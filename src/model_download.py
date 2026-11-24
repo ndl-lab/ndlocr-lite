@@ -11,6 +11,10 @@ from urllib.request import urlopen
 
 
 MODEL_BASE_URL = "https://lab.ndl.go.jp/dataset/ndlocr-lite/onnx/v2/"
+TABLE_MODEL = (
+    "tablecenternet_s_800_v3.onnx",
+    "fc26e20e0ece97be0d03b495481c33a3982f268966920297061b8c90215cdefa",
+)
 MODELS = {
     "det_weights": (
         "deim-s-1024x1024-261124.onnx",
