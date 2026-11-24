@@ -188,7 +188,7 @@ https://lab.ndl.go.jp/dataset/ndlocr-lite/ver1.2_models/parseq-ndl-24x768-100-ti
 
 
 ### ■NDLOCR-Lite ver2.0
-
+#### DEIMv2
 * 上記「学習(2)」に対応
 
 https://lab.ndl.go.jp/dataset/ndlocr-lite/ver2.0_models/deimv2-phase2-checkpoint0054.pth
